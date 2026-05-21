@@ -14,7 +14,8 @@ class QuickAuthStorage {
   SharedPreferences? _cached;
 
   Future<SharedPreferences> _prefs() async {
-    if (_override != null) return _override;
+    final override = _override;
+    if (override != null) return override;
     return _cached ??= await SharedPreferences.getInstance();
   }
 
