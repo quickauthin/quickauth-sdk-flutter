@@ -65,7 +65,12 @@ final result = await QuickAuth.auth.verifyOTP(
   sessionId: session.sessionId,
   code: '123456',
 );
-print(result.jwt);
+// result.verified == true, result.requestId == "req_…", result.message == "Verified successfully"
+//
+// Forward result.requestId to YOUR backend, which confirms with QuickAuth via
+// GET /v1/auth/status?requestId=... (X-Client-Id / X-Client-Secret) and mints
+// its own session JWT against its own user table.
+// See https://quickauth.in/docs/backend
 ```
 
 Auto-read inbound OTPs on Android:
