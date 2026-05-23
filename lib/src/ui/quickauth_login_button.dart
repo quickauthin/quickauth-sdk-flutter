@@ -27,8 +27,11 @@ class QuickAuthLoginButton extends StatefulWidget {
   /// E.164 phone number to send the OTP to.
   final String phone;
 
-  /// Called with the verified JWT on success.
-  final void Function(String jwt) onSuccess;
+  /// Called when verification succeeds. Receives the QuickAuth `requestId` —
+  /// forward it to your backend, which confirms server-to-server via
+  /// `GET /v1/auth/status?requestId=...` and mints its own session JWT.
+  /// See https://quickauth.in/docs/backend
+  final void Function(String requestId) onSuccess;
 
   /// Called when start/verify fails.
   final void Function(Object error)? onError;
@@ -94,7 +97,11 @@ class _QuickAuthLoginButtonState extends State<QuickAuthLoginButton> {
         sessionId: session.sessionId,
         code: code,
       );
-      widget.onSuccess(result.jwt);
+      if (result.verified) {
+        widget.onSuccess(result.requestId);
+      } else {
+        widget.onError?.call(Exception(result.message));
+      }
     } catch (e) {
       widget.onError?.call(e);
     } finally {
