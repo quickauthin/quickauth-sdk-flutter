@@ -3,6 +3,25 @@
 All notable changes to the QuickAuth Flutter SDK are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.0] — 2026-05-23
+
+### Changed
+- **BREAKING**: `OtpResult` returned by `verifyOTP` no longer contains
+  `jwt` / `expiresIn` / `userId`. QuickAuth is a verification provider,
+  not an identity provider — we tell you whether the phone was verified
+  and return a `requestId`. Forward `requestId` to your own backend,
+  which confirms server-to-server via `GET /v1/auth/status?requestId=...`
+  and mints its own session JWT against its own user table.
+  See https://quickauth.in/docs/backend
+  ```diff
+  - class OtpResult { String jwt; int expiresIn; String? userId; }
+  + class OtpResult { bool verified; String requestId; String message; }
+  ```
+- **BREAKING**: `QuickAuthLoginButton.onSuccess` signature changed from
+  `void Function(String jwt)` to `void Function(String requestId)`.
+  The widget now gates on `result.verified` internally and surfaces
+  `result.message` through `onError` on failure.
+
 ## [0.2.0] — 2026-04-28
 
 ### Changed
