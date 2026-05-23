@@ -50,7 +50,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _phone = TextEditingController(text: '+919876543210');
   final TextEditingController _otp = TextEditingController();
-  String? _jwt;
+  // QuickAuth returns a requestId; the merchant's backend confirms server-to-server
+  // and mints its own session JWT. This example just shows the requestId.
+  String? _requestId;
   String? _appHash;
   String? _error;
   OtpSession? _session;
@@ -91,8 +93,12 @@ class _HomeScreenState extends State<HomeScreen> {
         sessionId: s.sessionId,
         code: _otp.text.trim(),
       );
-      setState(() => _jwt = r.jwt);
-      await QuickAuth.attribution.trackConversion(event: 'login');
+      if (r.verified) {
+        setState(() => _requestId = r.requestId);
+        await QuickAuth.attribution.trackConversion(event: 'login');
+      } else {
+        setState(() => _error = r.message);
+      }
     } catch (e) {
       setState(() => _error = e.toString());
     }
@@ -125,7 +131,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 phone: _phone.text,
                 text: 'Continue with QuickAuth',
                 style: QuickAuthButtonStyle.primary,
-                onSuccess: (jwt) => setState(() => _jwt = jwt),
+                onSuccess: (requestId) => setState(() => _requestId = requestId),
                 onError: (e) => setState(() => _error = e.toString()),
               ),
               const SizedBox(height: 12),
@@ -134,7 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 text: 'Continue with WhatsApp',
                 style: QuickAuthButtonStyle.whatsapp,
                 channel: OtpChannel.whatsapp,
-                onSuccess: (jwt) => setState(() => _jwt = jwt),
+                onSuccess: (requestId) => setState(() => _requestId = requestId),
                 onError: (e) => setState(() => _error = e.toString()),
               ),
               const Divider(height: 40),
@@ -165,7 +171,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
               const SizedBox(height: 24),
-              if (_jwt != null) Text('JWT: $_jwt',
+              if (_requestId != null) Text('Verified — requestId: $_requestId',
                   style: const TextStyle(color: QuickAuthColors.accentDarker)),
               if (_error != null) Text('Error: $_error',
                   style: const TextStyle(color: QuickAuthColors.danger)),

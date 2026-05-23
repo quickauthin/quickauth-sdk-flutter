@@ -31,29 +31,37 @@ class OtpSession {
 }
 
 /// Result of `POST /v1/sdk/auth/verify`.
+///
+/// QuickAuth is a verification provider, not an identity provider. We tell
+/// you whether the phone was verified — forward [requestId] to your own
+/// backend, which confirms server-to-server via
+/// `GET /v1/auth/status?requestId=...` (with `X-Client-Id` / `X-Client-Secret`)
+/// and mints its own session JWT against its own user table.
+///
+/// See https://quickauth.in/docs/backend
 class OtpResult {
   /// Creates a verify result.
   const OtpResult({
-    required this.jwt,
-    required this.expiresIn,
-    this.userId,
+    required this.verified,
+    required this.requestId,
+    required this.message,
   });
 
   /// Decode from API JSON.
   factory OtpResult.fromJson(Map<String, dynamic> json) => OtpResult(
-        jwt: json['jwt'] as String,
-        expiresIn: (json['expiresIn'] as num?)?.toInt() ?? 3600,
-        userId: json['userId'] as String?,
+        verified: json['verified'] as bool? ?? false,
+        requestId: json['requestId'] as String? ?? '',
+        message: json['message'] as String? ?? '',
       );
 
-  /// Signed user JWT — pass this to your app backend.
-  final String jwt;
+  /// True iff the OTP matched and the phone is now verified.
+  final bool verified;
 
-  /// Seconds until the JWT expires.
-  final int expiresIn;
+  /// Opaque id — forward this to your backend for server-to-server confirmation.
+  final String requestId;
 
-  /// Optional resolved user id.
-  final String? userId;
+  /// Human-readable status, e.g. "Verified successfully".
+  final String message;
 }
 
 /// Headless OTP API. Available as `QuickAuth.auth`.
