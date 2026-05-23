@@ -1,0 +1,138 @@
+name: Publish to pub.dev
+
+# Manual trigger. Goes to Actions → "Publish to pub.dev" → Run workflow →
+# enter the version (e.g. 1.0.0 or 1.0.1) → click Run.
+#
+# The workflow:
+#   1. Bumps pubspec.yaml version
+#   2. Runs `flutter analyze` (errors only) + `flutter test`
+#   3. Publishes via OIDC-authenticated `flutter pub publish --force`
+#   4. Commits the bump, tags v<version>, pushes
+#
+# One-time setup (per repo) — TWO options for auth:
+#
+#   OPTION A — OIDC (recommended, no secret to manage):
+#     1. pub.dev → My publishers → quickauth.in → Automated publishing
+#     2. Add this repo: dhvl4/quickauth-sdk-flutter
+#        (or quickauthin/quickauth-sdk-flutter — match the repo's actual
+#        github owner; check `git remote get-url origin`)
+#     3. Tag pattern: v{{version}}
+#     4. Done — this workflow uses dart-lang/setup-dart with OIDC
+#
+#   OPTION B — credentials secret (fallback if you can't use OIDC):
+#     1. On your dev machine: `flutter pub login` → opens browser → sign in
+#     2. `cat ~/Library/Application\ Support/dart/pub-credentials.json`
+#     3. Settings → Secrets → New: PUB_CREDENTIALS_JSON (paste the file)
+#     4. Comment out the OIDC step below and uncomment the secret-restore
+#        step further down
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (semver, e.g. 1.0.1)'
+        required: true
+        type: string
+
+concurrency:
+  group: publish-pubdev
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # commits + tags
+  id-token: write   # OIDC token for pub.dev auth
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Validate version input
+        run: |
+          if ! [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9\.]+)?$ ]]; then
+            echo "::error::Version '${{ inputs.version }}' is not a valid semver."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.x'
+          channel: stable
+          cache: true
+
+      # ── OIDC auth (Option A) ─────────────────────────────────────────────
+      # Modern approach — requires pub.dev publisher to authorise the repo
+      # under My publishers → quickauth.in → Automated publishing.
+      - name: Authenticate with pub.dev (OIDC)
+        # `dart-lang/setup-dart` populates an OIDC token that pub.dev trusts
+        # when the publisher has authorised this repo + tag pattern.
+        uses: dart-lang/setup-dart@v1
+
+      # ── Credentials secret auth (Option B) ───────────────────────────────
+      # Uncomment if you're using PUB_CREDENTIALS_JSON instead of OIDC.
+      # - name: Restore pub.dev credentials from secret
+      #   run: |
+      #     mkdir -p ~/.config/dart
+      #     echo '${{ secrets.PUB_CREDENTIALS_JSON }}' > ~/.config/dart/pub-credentials.json
+      #     chmod 600 ~/.config/dart/pub-credentials.json
+
+      - name: Bump pubspec.yaml to ${{ inputs.version }}
+        run: |
+          sed -i "s/^version: .*/version: ${{ inputs.version }}/" pubspec.yaml
+          echo "After bump:"
+          grep "^version:" pubspec.yaml
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: flutter analyze (errors only)
+        # Info-level lints (missing docs, prefer_const, etc.) are allowed;
+        # only `error` severity blocks the publish.
+        run: |
+          flutter analyze 2>&1 | tee analyze.log
+          if grep -q "^[[:space:]]*error" analyze.log; then
+            echo "::error::flutter analyze found errors"
+            exit 1
+          fi
+
+      - name: flutter test
+        run: flutter test
+
+      - name: Publish to pub.dev (dry-run sanity check)
+        # Catches packaging issues without actually shipping.
+        run: flutter pub publish --dry-run
+
+      - name: Publish to pub.dev (real)
+        run: flutter pub publish --force
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit version bump + tag + push
+        run: |
+          git add pubspec.yaml
+          git commit -m "chore(release): v${{ inputs.version }}"
+          git tag -a "v${{ inputs.version }}" -m "v${{ inputs.version }}"
+          git push origin HEAD --follow-tags
+
+      - name: Summary
+        run: |
+          {
+            echo "## ✅ Published quickauth ${{ inputs.version }}"
+            echo ""
+            echo "- pub.dev: https://pub.dev/packages/quickauth/versions/${{ inputs.version }}"
+            echo "- Tag: \`v${{ inputs.version }}\`"
+            echo "- Install: \`flutter pub add quickauth\` (resolves to ^${{ inputs.version }})"
+            echo ""
+            echo "Note: pub.dev indexes new versions within ~10 minutes."
+          } >> $GITHUB_STEP_SUMMARY

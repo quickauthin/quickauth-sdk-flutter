@@ -1,6 +1,6 @@
 name: quickauth
 description: QuickAuth Flutter SDK — phone OTP (SMS / WhatsApp) auth and WhatsApp marketing attribution.
-version: 0.1.0
+version: 1.0.0
 homepage: https://quickauth.in
 repository: https://github.com/quickauthin/quickauth-sdk-flutter
 issue_tracker: https://github.com/quickauthin/quickauth-sdk-flutter/issues

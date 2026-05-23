@@ -109,7 +109,7 @@ void main() {
       expect(body['channel'], 'whatsapp');
     });
 
-    test('verifyOTP posts sessionId + code and returns jwt', () async {
+    test('verifyOTP posts sessionId + code and returns verified + requestId', () async {
       late http.Request lastReq;
       final mock = MockClient((req) async {
         lastReq = req;
@@ -119,9 +119,9 @@ void main() {
         expect(body['code'], '123456');
         return http.Response(
           jsonEncode(<String, dynamic>{
-            'jwt': 'eyJ.signed',
-            'expiresIn': 3600,
-            'userId': 'usr_1',
+            'verified': true,
+            'requestId': 'req_abc',
+            'message': 'Verified successfully',
           }),
           200,
           headers: <String, String>{'content-type': 'application/json'},
@@ -136,9 +136,9 @@ void main() {
         sessionId: 'sess_abc',
         code: '123456',
       );
-      expect(result.jwt, 'eyJ.signed');
-      expect(result.expiresIn, 3600);
-      expect(result.userId, 'usr_1');
+      expect(result.verified, isTrue);
+      expect(result.requestId, 'req_abc');
+      expect(result.message, 'Verified successfully');
       expect(lastReq.headers['authorization'], startsWith('Bearer '));
     });
 
