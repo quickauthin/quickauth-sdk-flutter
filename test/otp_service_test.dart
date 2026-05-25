@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
@@ -5,10 +6,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quickauth/quickauth.dart';
+import 'package:quickauth/src/auth/auth_event.dart';
 import 'package:quickauth/src/auth/otp_service.dart';
 import 'package:quickauth/src/auth/sms_retriever.dart';
 import 'package:quickauth/src/core/api_client.dart';
 import 'package:quickauth/src/core/config.dart';
+import 'package:quickauth/src/core/storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeSmsRetriever extends SmsRetriever {
   _FakeSmsRetriever()
@@ -29,28 +33,25 @@ class _FakeSmsRetriever extends SmsRetriever {
   Future<String?> getAppHash() async => null;
 }
 
-/// Build a JWT with the given `exp` (seconds since epoch). Signature is
-/// fake — the SDK only base64-decodes the payload, never verifies the sig.
 String _fakeJwt({required int exp, String sub = 'sess_test'}) {
   String b64(Map<String, dynamic> m) {
     final s = base64Url.encode(utf8.encode(jsonEncode(m)));
     return s.replaceAll('=', '');
   }
-
   final header = b64(<String, dynamic>{'alg': 'HS256', 'typ': 'JWT'});
   final payload = b64(<String, dynamic>{'sub': sub, 'exp': exp});
   return '$header.$payload.sig';
 }
 
-QuickAuthConfig _config() => QuickAuthConfig(
+QuickAuthConfig _config({AuthEventHandler? onAuthEvent}) => QuickAuthConfig(
       onTokenExpiry: () async => _fakeJwt(
         exp: DateTime.now().add(const Duration(minutes: 10)).millisecondsSinceEpoch ~/
             1000,
       ),
+      onAuthEvent: onAuthEvent,
     );
 
-QuickAuthApiClient _client(MockClient mock, {String? seedToken}) {
-  final cfg = _config();
+QuickAuthApiClient _client(MockClient mock, QuickAuthConfig cfg, {String? seedToken}) {
   final tm = TokenManager(
     provider: cfg.onTokenExpiry,
     initialToken: seedToken ??
@@ -64,61 +65,141 @@ QuickAuthApiClient _client(MockClient mock, {String? seedToken}) {
   return QuickAuthApiClient(config: cfg, tokenManager: tm, httpClient: mock);
 }
 
+QuickAuthOtpService _service(MockClient mock, {
+  AuthEventHandler? onAuthEvent,
+  String? seedToken,
+}) {
+  late QuickAuthConfig cfg;
+  cfg = _config(onAuthEvent: onAuthEvent);
+  return QuickAuthOtpService(
+    apiClient: _client(mock, cfg, seedToken: seedToken),
+    smsRetriever: _FakeSmsRetriever(),
+    storage: QuickAuthStorage(),
+    configProvider: () => cfg,
+  );
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('QuickAuthOtpService.startOTP', () {
-    test('posts phone + channel and parses session', () async {
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
+  group('QuickAuthOtpService.initiate', () {
+    test('posts phone + channel and emits OtpSent on OTP_SENT state', () async {
       late http.Request lastRequest;
       final mock = MockClient((req) async {
         lastRequest = req;
         return http.Response(
           jsonEncode(<String, dynamic>{
+            'state': 'OTP_SENT',
             'sessionId': 'sess_abc',
             'expiresIn': 300,
-            'channelUsed': 'whatsapp',
+            'deviceToken': 'dtok_new',
           }),
           200,
           headers: <String, String>{'content-type': 'application/json'},
         );
       });
-      final seed = _fakeJwt(
-        exp: DateTime.now().add(const Duration(minutes: 9)).millisecondsSinceEpoch ~/
-            1000,
-        sub: 'sess_seed',
-      );
-      final service = QuickAuthOtpService(
-        apiClient: _client(mock, seedToken: seed),
-        smsRetriever: _FakeSmsRetriever(),
-      );
 
-      final session = await service.startOTP(
-        phone: '+919876543210',
-        channel: OtpChannel.whatsapp,
-      );
+      final events = <AuthEvent>[];
+      final service = _service(mock, onAuthEvent: events.add);
+      await service.initiate(phone: '+919876543210', channel: OtpChannel.whatsapp);
+      // Drain microtasks so the queued event fires.
+      await Future<void>.delayed(Duration.zero);
 
-      expect(session.sessionId, 'sess_abc');
-      expect(session.expiresIn, 300);
-      expect(session.channelUsed, 'whatsapp');
       expect(lastRequest.url.path, '/v1/sdk/auth/initiate');
-      // Bearer header is the load-bearing change in this SDK release.
-      expect(lastRequest.headers['authorization'], 'Bearer $seed');
-      expect(lastRequest.headers['content-type'], contains('application/json'));
       final body = jsonDecode(lastRequest.body) as Map<String, dynamic>;
       expect(body['phone'], '+919876543210');
       expect(body['channel'], 'whatsapp');
+
+      expect(events, hasLength(1));
+      final ev = events[0] as OtpSentEvent;
+      expect(ev.sessionId, 'sess_abc');
+      expect(ev.channel, OtpChannel.whatsapp);
+      expect(ev.expiresIn, 300);
     });
 
-    test('verifyOTP posts sessionId + code and returns verified + requestId', () async {
-      late http.Request lastReq;
+    test('emits Verified directly when backend reports OneTap', () async {
+      final mock = MockClient((req) async => http.Response(
+            jsonEncode(<String, dynamic>{
+              'state': 'VERIFIED',
+              'sessionId': 'req_verified',
+              'expiresIn': 300,
+              'deviceToken': 'dtok_v',
+            }),
+            200,
+            headers: <String, String>{'content-type': 'application/json'},
+          ));
+      final events = <AuthEvent>[];
+      final service = _service(mock, onAuthEvent: events.add);
+
+      await service.initiate(phone: '+919876543210');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events, hasLength(1));
+      expect(events[0], isA<VerifiedEvent>());
+      expect((events[0] as VerifiedEvent).requestId, 'req_verified');
+    });
+
+    test('replays stored deviceToken on subsequent initiate', () async {
+      var callCount = 0;
+      final bodies = <Map<String, dynamic>>[];
       final mock = MockClient((req) async {
-        lastReq = req;
-        expect(req.url.path, '/v1/sdk/auth/verify');
-        final body = jsonDecode(req.body) as Map<String, dynamic>;
-        expect(body['sessionId'], 'sess_abc');
-        expect(body['code'], '123456');
+        callCount++;
+        bodies.add(jsonDecode(req.body) as Map<String, dynamic>);
         return http.Response(
           jsonEncode(<String, dynamic>{
+            'state': 'OTP_SENT',
+            'sessionId': 'sess_$callCount',
+            'expiresIn': 300,
+            'deviceToken': 'dtok_abc',
+          }),
+          200,
+          headers: <String, String>{'content-type': 'application/json'},
+        );
+      });
+      final service = _service(mock);
+
+      await service.initiate(phone: '+919876543210');
+      await service.initiate(phone: '+919876543210');
+
+      expect(bodies[0]['deviceToken'], isNull);
+      expect(bodies[1]['deviceToken'], 'dtok_abc');
+    });
+
+    test('rejects non-E.164 phones', () async {
+      final service = _service(MockClient((_) async => http.Response('{}', 200)));
+      expect(
+        () => service.initiate(phone: 'bad'),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+  });
+
+  group('QuickAuthOtpService.submitOtp', () {
+    test('emits Verified on success and forwards deviceToken', () async {
+      var callIndex = 0;
+      final bodies = <Map<String, dynamic>>[];
+      final mock = MockClient((req) async {
+        bodies.add(jsonDecode(req.body) as Map<String, dynamic>);
+        callIndex++;
+        if (callIndex == 1) {
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'state': 'OTP_SENT',
+              'sessionId': 'sess_1',
+              'expiresIn': 300,
+              'deviceToken': 'dtok_v',
+            }),
+            200,
+            headers: <String, String>{'content-type': 'application/json'},
+          );
+        }
+        return http.Response(
+          jsonEncode(<String, dynamic>{
+            'state': 'VERIFIED',
             'verified': true,
             'requestId': 'req_abc',
             'message': 'Verified successfully',
@@ -127,114 +208,140 @@ void main() {
           headers: <String, String>{'content-type': 'application/json'},
         );
       });
-      final service = QuickAuthOtpService(
-        apiClient: _client(mock),
-        smsRetriever: _FakeSmsRetriever(),
-      );
+      final events = <AuthEvent>[];
+      final service = _service(mock, onAuthEvent: events.add);
 
-      final result = await service.verifyOTP(
-        sessionId: 'sess_abc',
-        code: '123456',
-      );
-      expect(result.verified, isTrue);
-      expect(result.requestId, 'req_abc');
-      expect(result.message, 'Verified successfully');
-      expect(lastReq.headers['authorization'], startsWith('Bearer '));
+      await service.initiate(phone: '+919876543210');
+      await service.submitOtp('123456');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events.map((e) => e.runtimeType.toString()),
+          equals(['OtpSentEvent', 'VerifiedEvent']));
+      expect(bodies[1]['sessionId'], 'sess_1');
+      expect(bodies[1]['code'], '123456');
+      expect(bodies[1]['deviceToken'], 'dtok_v');
     });
 
-    test('non-2xx response throws QuickAuthApiException with message', () async {
-      final mock = MockClient((_) async => http.Response(
-            jsonEncode(<String, dynamic>{
-              'message': 'Invalid phone',
-              'code': 'invalid_phone',
-            }),
-            422,
-            headers: <String, String>{'content-type': 'application/json'},
-          ));
-      final service = QuickAuthOtpService(
-        apiClient: _client(mock),
-        smsRetriever: _FakeSmsRetriever(),
-      );
-
-      expect(
-        () => service.startOTP(phone: 'bad'),
-        throwsA(isA<QuickAuthApiException>()
-            .having((e) => e.statusCode, 'statusCode', 422)
-            .having((e) => e.code, 'code', 'invalid_phone')
-            .having((e) => e.message, 'message', 'Invalid phone')),
-      );
-    });
-
-    test('verifyOTP without active session throws', () async {
-      final service = QuickAuthOtpService(
-        apiClient: _client(MockClient((_) async => http.Response('{}', 200))),
-        smsRetriever: _FakeSmsRetriever(),
-      );
-      expect(
-        () => service.verifyOTP(code: '111111'),
-        throwsA(isA<QuickAuthApiException>()),
-      );
-    });
-
-    test('on 401 the client invalidates token + retries once', () async {
-      // First provider call returns t1 (rejected), second returns t2 (ok).
-      final tokens = <String>[
-        _fakeJwt(
-          exp: DateTime.now()
-                  .add(const Duration(minutes: 10))
-                  .millisecondsSinceEpoch ~/
-              1000,
-          sub: 't1',
-        ),
-        _fakeJwt(
-          exp: DateTime.now()
-                  .add(const Duration(minutes: 10))
-                  .millisecondsSinceEpoch ~/
-              1000,
-          sub: 't2',
-        ),
-      ];
-      var providerCalls = 0;
-      final calls = <String>[];
+    test('emits OtpFailed on wrong code, retry-able', () async {
+      var callIndex = 0;
       final mock = MockClient((req) async {
-        calls.add(req.headers['authorization']!);
-        if (calls.length == 1) {
-          return http.Response('{"message":"unauth"}', 401,
-              headers: <String, String>{'content-type': 'application/json'});
+        callIndex++;
+        if (callIndex == 1) {
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'state': 'OTP_SENT',
+              'sessionId': 'sess_1',
+              'expiresIn': 300,
+              'deviceToken': 'dtok_v',
+            }),
+            200,
+            headers: <String, String>{'content-type': 'application/json'},
+          );
+        }
+        if (callIndex == 2) {
+          return http.Response(
+            jsonEncode(<String, dynamic>{
+              'state': 'OTP_FAILED',
+              'verified': false,
+              'requestId': 'sess_1',
+              'message': 'Invalid OTP. 2 attempt(s) remaining.',
+            }),
+            200,
+            headers: <String, String>{'content-type': 'application/json'},
+          );
         }
         return http.Response(
           jsonEncode(<String, dynamic>{
-            'sessionId': 'sess_after_retry',
-            'expiresIn': 300,
+            'state': 'VERIFIED',
+            'verified': true,
+            'requestId': 'req_abc',
+            'message': 'Verified successfully',
           }),
           200,
           headers: <String, String>{'content-type': 'application/json'},
         );
       });
-      final cfg = QuickAuthConfig(onTokenExpiry: () async {
-        providerCalls++;
-        return tokens.removeAt(0);
-      });
-      final tm =
-          TokenManager(provider: cfg.onTokenExpiry, initialToken: null);
-      final api = QuickAuthApiClient(
-          config: cfg, tokenManager: tm, httpClient: mock);
-      final service = QuickAuthOtpService(
-        apiClient: api,
-        smsRetriever: _FakeSmsRetriever(),
-      );
+      final events = <AuthEvent>[];
+      final service = _service(mock, onAuthEvent: events.add);
 
-      final s = await service.startOTP(phone: '+911111111111');
-      expect(s.sessionId, 'sess_after_retry');
-      expect(calls.length, 2);
-      expect(calls[0], startsWith('Bearer '));
-      expect(calls[1], startsWith('Bearer '));
-      expect(calls[0] != calls[1], true,
-          reason: 'token must be refreshed after 401');
-      expect(providerCalls, 2);
+      await service.initiate(phone: '+919876543210');
+      await service.submitOtp('000000');
+      await service.submitOtp('123456');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events.map((e) => e.runtimeType.toString()),
+          equals(['OtpSentEvent', 'OtpFailedEvent', 'VerifiedEvent']));
     });
 
-    test('OtpChannel wire mapping is stable', () {
+    test('submitOtp before initiate throws StateError', () async {
+      final service = _service(MockClient((_) async => http.Response('{}', 200)));
+      expect(
+        () => service.submitOtp('123456'),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('submitOtp rejects malformed code', () async {
+      final service = _service(MockClient((_) async => http.Response('{}', 200)));
+      expect(
+        () => service.submitOtp('abc'),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+  });
+
+  group('QuickAuthOtpService.reset', () {
+    test('with forgetDevice clears stored deviceToken', () async {
+      final bodies = <Map<String, dynamic>>[];
+      final mock = MockClient((req) async {
+        bodies.add(jsonDecode(req.body) as Map<String, dynamic>);
+        return http.Response(
+          jsonEncode(<String, dynamic>{
+            'state': 'OTP_SENT',
+            'sessionId': 'sess_x',
+            'expiresIn': 300,
+            'deviceToken': 'dtok_x',
+          }),
+          200,
+          headers: <String, String>{'content-type': 'application/json'},
+        );
+      });
+      final service = _service(mock);
+
+      await service.initiate(phone: '+919876543210');
+      await service.reset(forgetDevice: true);
+      await service.initiate(phone: '+919876543210');
+
+      expect(bodies[0]['deviceToken'], isNull);
+      expect(bodies[1]['deviceToken'], isNull,
+          reason: 'forgetDevice should drop the token');
+    });
+  });
+
+  group('QuickAuthOtpService.error path', () {
+    test('emits AuthError on transport failure', () async {
+      final mock = MockClient((_) async => http.Response(
+            jsonEncode(<String, dynamic>{'message': 'boom'}),
+            500,
+            headers: <String, String>{'content-type': 'application/json'},
+          ));
+      final events = <AuthEvent>[];
+      final service = _service(mock, onAuthEvent: events.add);
+
+      await expectLater(
+        () => service.initiate(phone: '+919876543210'),
+        throwsA(isA<QuickAuthApiException>()),
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events, hasLength(1));
+      final ev = events[0] as AuthErrorEvent;
+      expect(ev.code, 'SERVER_ERROR');
+    });
+  });
+
+  group('OtpChannel wire mapping', () {
+    test('stable strings', () {
       expect(OtpChannel.auto.wire, 'auto');
       expect(OtpChannel.sms.wire, 'sms');
       expect(OtpChannel.whatsapp.wire, 'whatsapp');

@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../auth/auth_event.dart';
 import '../core/config.dart';
 import '../quickauth_facade.dart';
 import 'quickauth_otp_field.dart';
@@ -8,9 +11,15 @@ import 'theme.dart';
 /// One-tap "Continue with QuickAuth" button.
 ///
 /// On tap:
-/// 1. Calls `QuickAuth.auth.startOTP(phone, channel)`.
-/// 2. Pushes a modal sheet hosting a 6-digit input.
-/// 3. Calls [onSuccess] with the resolved JWT, or [onError] on any failure.
+/// 1. Calls `QuickAuth.auth.initiate(phone, channel)`.
+/// 2. Pushes a modal sheet hosting a 6-digit input when [OtpSentEvent]
+///    fires; immediately calls [onSuccess] when [VerifiedEvent] fires
+///    (OneTap silent re-auth).
+/// 3. The OTP sheet calls `submitOtp` and listens for [VerifiedEvent] /
+///    [OtpFailedEvent] / [AuthErrorEvent].
+///
+/// The button transiently installs an [AuthEventHandler] for the duration
+/// of the flow, preserving any pre-existing handler the app has set.
 class QuickAuthLoginButton extends StatefulWidget {
   /// Creates the button.
   const QuickAuthLoginButton({
@@ -75,36 +84,84 @@ class _QuickAuthLoginButtonState extends State<QuickAuthLoginButton> {
   Future<void> _onPressed() async {
     if (_busy) return;
     setState(() => _busy = true);
+
+    // Transiently install an event handler for this flow, restoring any
+    // pre-existing one when we're done.
+    final previousHandler = QuickAuth.config.onAuthEvent;
+    final completer = Completer<void>();
+
+    void handler(AuthEvent event) {
+      previousHandler?.call(event);
+      switch (event) {
+        case OtpSentEvent():
+          if (!mounted) return;
+          showModalBottomSheet<String>(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: QuickAuthColors.card,
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            builder: (sheetCtx) => _OtpSheet(phone: widget.phone),
+          ).then((code) {
+            if (code == null) {
+              // User cancelled — close the flow.
+              if (!completer.isCompleted) completer.complete();
+            } else {
+              QuickAuth.auth.submitOtp(code).catchError((Object e) {
+                widget.onError?.call(e);
+              });
+            }
+          });
+        case VerifiedEvent(:final requestId):
+          widget.onSuccess(requestId);
+          if (!completer.isCompleted) completer.complete();
+        case OtpFailedEvent(:final message):
+          widget.onError?.call(Exception(message));
+        case AuthErrorEvent(:final message):
+          widget.onError?.call(Exception(message));
+          if (!completer.isCompleted) completer.complete();
+        case OtpAutoReadEvent():
+          // No-op — the bottom sheet's OTP field handles auto-fill itself.
+          break;
+      }
+    }
+
+    // Install transiently. We cannot rewrite QuickAuthConfig (immutable),
+    // so we replace it with a copy that has the new handler. The closure
+    // captures `previousHandler` so we can chain.
+    QuickAuth.setConfigForFlow(QuickAuthConfig(
+      apiBaseUrl: QuickAuth.config.apiBaseUrl,
+      onTokenExpiry: QuickAuth.config.onTokenExpiry,
+      initialToken: QuickAuth.config.initialToken,
+      unsafeDirectClientId: QuickAuth.config.unsafeDirectClientId,
+      unsafeDirectClientSecret: QuickAuth.config.unsafeDirectClientSecret,
+      otpLength: QuickAuth.config.otpLength,
+      requestTimeout: QuickAuth.config.requestTimeout,
+      debug: QuickAuth.config.debug,
+      onAuthEvent: handler,
+    ));
+
     try {
-      final session = await QuickAuth.auth.startOTP(
+      await QuickAuth.auth.initiate(
         phone: widget.phone,
         channel: widget.channel,
       );
-      if (!mounted) return;
-      final code = await showModalBottomSheet<String>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: QuickAuthColors.card,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-        ),
-        builder: (sheetCtx) => _OtpSheet(phone: widget.phone),
-      );
-      if (code == null) {
-        return;
-      }
-      final result = await QuickAuth.auth.verifyOTP(
-        sessionId: session.sessionId,
-        code: code,
-      );
-      if (result.verified) {
-        widget.onSuccess(result.requestId);
-      } else {
-        widget.onError?.call(Exception(result.message));
-      }
+      await completer.future;
     } catch (e) {
       widget.onError?.call(e);
     } finally {
+      QuickAuth.setConfigForFlow(QuickAuthConfig(
+        apiBaseUrl: QuickAuth.config.apiBaseUrl,
+        onTokenExpiry: QuickAuth.config.onTokenExpiry,
+        initialToken: QuickAuth.config.initialToken,
+        unsafeDirectClientId: QuickAuth.config.unsafeDirectClientId,
+        unsafeDirectClientSecret: QuickAuth.config.unsafeDirectClientSecret,
+        otpLength: QuickAuth.config.otpLength,
+        requestTimeout: QuickAuth.config.requestTimeout,
+        debug: QuickAuth.config.debug,
+        onAuthEvent: previousHandler,
+      ));
       if (mounted) setState(() => _busy = false);
     }
   }

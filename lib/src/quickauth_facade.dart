@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'attribution/attribution_service.dart';
+import 'auth/auth_event.dart';
 import 'auth/otp_service.dart';
 import 'auth/sms_retriever.dart';
 import 'auth/whatsapp_login.dart';
@@ -93,6 +94,7 @@ class QuickAuth {
     String? unsafeDirectClientSecret,
     bool consent = false,
     bool debug = false,
+    AuthEventHandler? onAuthEvent,
   }) async {
     final cfg = QuickAuthConfig(
       apiBaseUrl: apiBaseUrl,
@@ -101,6 +103,7 @@ class QuickAuth {
       unsafeDirectClientId: unsafeDirectClientId,
       unsafeDirectClientSecret: unsafeDirectClientSecret,
       debug: debug,
+      onAuthEvent: onAuthEvent,
     );
 
     final inst = _instance ??= QuickAuth._();
@@ -135,6 +138,8 @@ class QuickAuth {
     inst._auth = QuickAuthOtpService(
       apiClient: inst._api,
       smsRetriever: smsRetriever,
+      storage: inst._storage,
+      configProvider: () => inst._config,
     );
     inst._whatsapp = WhatsAppLogin();
     inst._attribution = QuickAuthAttributionService(
@@ -169,6 +174,31 @@ class QuickAuth {
       );
     }
     return token;
+  }
+
+  /// Replace the active config (used by pre-built UI components to
+  /// transiently install an event handler for their flow). Most apps
+  /// should not call this — pass `onAuthEvent` to [init] instead.
+  static void setConfigForFlow(QuickAuthConfig cfg) {
+    _i._config = cfg;
+  }
+
+  /// Replace the active auth event handler at runtime. Useful when the
+  /// merchant wants to attach the handler from `initState` of a widget
+  /// rather than at `init` time.
+  static void setAuthEventHandler(AuthEventHandler? handler) {
+    final cfg = _i._config;
+    _i._config = QuickAuthConfig(
+      apiBaseUrl: cfg.apiBaseUrl,
+      onTokenExpiry: cfg.onTokenExpiry,
+      initialToken: cfg.initialToken,
+      unsafeDirectClientId: cfg.unsafeDirectClientId,
+      unsafeDirectClientSecret: cfg.unsafeDirectClientSecret,
+      otpLength: cfg.otpLength,
+      requestTimeout: cfg.requestTimeout,
+      debug: cfg.debug,
+      onAuthEvent: handler,
+    );
   }
 
   /// Reset the SDK — primarily for tests.

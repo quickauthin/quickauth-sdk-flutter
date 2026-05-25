@@ -19,6 +19,7 @@ export 'src/core/consent.dart';
 export 'src/core/api_client.dart' show QuickAuthApiException, TokenManager;
 
 // ---- Auth ----
+export 'src/auth/auth_event.dart';
 export 'src/auth/otp_service.dart';
 export 'src/auth/whatsapp_login.dart';
 
