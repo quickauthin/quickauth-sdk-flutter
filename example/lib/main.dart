@@ -55,11 +55,12 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _requestId;
   String? _appHash;
   String? _error;
-  OtpSession? _session;
+  bool _otpSent = false;
 
   @override
   void initState() {
     super.initState();
+    QuickAuth.setAuthEventHandler(_onAuthEvent);
     QuickAuth.auth.getAppHash().then((h) {
       if (mounted) setState(() => _appHash = h);
     });
@@ -67,41 +68,55 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    QuickAuth.setAuthEventHandler(null);
     _phone.dispose();
     _otp.dispose();
     super.dispose();
   }
 
   Future<void> _headlessStart() async {
-    setState(() => _error = null);
+    setState(() {
+      _error = null;
+      _otpSent = false;
+      _requestId = null;
+    });
     try {
-      final s = await QuickAuth.auth.startOTP(
+      // Outcomes (OtpSentEvent, VerifiedEvent, OtpFailedEvent, AuthErrorEvent)
+      // arrive via the onAuthEvent handler installed at QuickAuth.init.
+      await QuickAuth.auth.initiate(
         phone: _phone.text.trim(),
         channel: OtpChannel.auto,
       );
-      setState(() => _session = s);
     } catch (e) {
       setState(() => _error = e.toString());
     }
   }
 
   Future<void> _headlessVerify() async {
-    final s = _session;
-    if (s == null) return;
     try {
-      final r = await QuickAuth.auth.verifyOTP(
-        sessionId: s.sessionId,
-        code: _otp.text.trim(),
-      );
-      if (r.verified) {
-        setState(() => _requestId = r.requestId);
-        await QuickAuth.attribution.trackConversion(event: 'login');
-      } else {
-        setState(() => _error = r.message);
-      }
+      await QuickAuth.auth.submitOtp(_otp.text.trim());
     } catch (e) {
       setState(() => _error = e.toString());
     }
+  }
+
+  void _onAuthEvent(AuthEvent event) {
+    setState(() {
+      switch (event) {
+        case OtpSentEvent():
+          _otpSent = true;
+        case VerifiedEvent(:final requestId):
+          _requestId = requestId;
+          _otpSent = false;
+          QuickAuth.attribution.trackConversion(event: 'login');
+        case OtpFailedEvent(:final message):
+          _error = message;
+        case AuthErrorEvent(:final message):
+          _error = message;
+        case OtpAutoReadEvent(:final code):
+          _otp.text = code;
+      }
+    });
   }
 
   @override
@@ -156,7 +171,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onPressed: _headlessStart,
                 child: const Text('Send OTP'),
               ),
-              if (_session != null) ...<Widget>[
+              if (_otpSent) ...<Widget>[
                 const SizedBox(height: 16),
                 QuickAuthOtpField(
                   controller: _otp,

@@ -1,3 +1,5 @@
+import '../auth/auth_event.dart';
+
 /// Signature for the customer-supplied callback that mints a fresh QuickAuth
 /// session JWT. The SDK invokes this whenever the cached token is missing,
 /// expired, or about to expire (~30s before `exp`). The callback is expected
@@ -39,6 +41,7 @@ class QuickAuthConfig {
     this.otpLength = defaultOtpLength,
     this.requestTimeout = defaultRequestTimeout,
     this.debug = false,
+    this.onAuthEvent,
   });
 
   /// Override the API base URL (e.g. for staging). Defaults to
@@ -75,6 +78,15 @@ class QuickAuthConfig {
 
   /// When `true`, internal services emit `debugPrint` lines.
   final bool debug;
+
+  /// Headless auth event handler. The SDK invokes this with a typed
+  /// [AuthEvent] as the auth lifecycle progresses (OTP sent, verified,
+  /// failed, error). Pass at [QuickAuth.init]; one handler per config.
+  ///
+  /// Events are delivered via a microtask so callers can rely on the
+  /// pattern `await initiate(); /* handler fires next tick */` without
+  /// racing themselves.
+  final AuthEventHandler? onAuthEvent;
 
   /// Whether the SDK was configured with the unsafe-direct escape hatch.
   bool get isUnsafeDirect =>
