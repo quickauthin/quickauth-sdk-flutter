@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:quickauth/src/core/api_client.dart';
-import 'package:quickauth/src/core/config.dart';
+import 'package:quickauth_flutter/src/core/api_client.dart';
+import 'package:quickauth_flutter/src/core/config.dart';
 
 String _b64(Map<String, dynamic> m) =>
     base64Url.encode(utf8.encode(jsonEncode(m))).replaceAll('=', '');

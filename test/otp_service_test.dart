@@ -5,13 +5,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:quickauth/quickauth.dart';
-import 'package:quickauth/src/auth/auth_event.dart';
-import 'package:quickauth/src/auth/otp_service.dart';
-import 'package:quickauth/src/auth/sms_retriever.dart';
-import 'package:quickauth/src/core/api_client.dart';
-import 'package:quickauth/src/core/config.dart';
-import 'package:quickauth/src/core/storage.dart';
+import 'package:quickauth_flutter/quickauth_flutter.dart';
+import 'package:quickauth_flutter/src/auth/auth_event.dart';
+import 'package:quickauth_flutter/src/auth/otp_service.dart';
+import 'package:quickauth_flutter/src/auth/sms_retriever.dart';
+import 'package:quickauth_flutter/src/core/api_client.dart';
+import 'package:quickauth_flutter/src/core/config.dart';
+import 'package:quickauth_flutter/src/core/storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeSmsRetriever extends SmsRetriever {

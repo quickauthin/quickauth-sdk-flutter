@@ -5,6 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [1.1.1] — 2026-08-20
 
+### Changed
+- **Package renamed** `quickauth` → `quickauth_flutter`. Import
+  `package:quickauth_flutter/quickauth_flutter.dart` and depend on
+  `quickauth_flutter:` in your `pubspec.yaml`. The public API is unchanged.
+
 ### Added
 - Consent-gated `deviceInfo` capture on `initiate` and `submitOtp`. When
   DPDP/GDPR consent has been granted via `QuickAuth.consent`, the SDK now

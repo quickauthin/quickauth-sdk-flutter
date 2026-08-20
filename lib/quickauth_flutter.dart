@@ -11,7 +11,7 @@
 ///   code: '123456',
 /// );
 /// ```
-library quickauth;
+library quickauth_flutter;
 
 // ---- Core ----
 export 'src/core/config.dart';

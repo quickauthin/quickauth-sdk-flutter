@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:quickauth/quickauth.dart';
+import 'package:quickauth_flutter/quickauth_flutter.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

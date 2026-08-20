@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:quickauth/src/core/consent.dart';
-import 'package:quickauth/src/core/storage.dart';
+import 'package:quickauth_flutter/src/core/consent.dart';
+import 'package:quickauth_flutter/src/core/storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Future<QuickAuthStorage> _storage() async {

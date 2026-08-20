@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  quickauth:
+  quickauth_flutter:
     path: ../
 
 dev_dependencies:

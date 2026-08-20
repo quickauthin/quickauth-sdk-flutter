@@ -3,11 +3,11 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:quickauth/src/attribution/attribution_service.dart';
-import 'package:quickauth/src/core/api_client.dart';
-import 'package:quickauth/src/core/config.dart';
-import 'package:quickauth/src/core/consent.dart';
-import 'package:quickauth/src/core/storage.dart';
+import 'package:quickauth_flutter/src/attribution/attribution_service.dart';
+import 'package:quickauth_flutter/src/core/api_client.dart';
+import 'package:quickauth_flutter/src/core/config.dart';
+import 'package:quickauth_flutter/src/core/consent.dart';
+import 'package:quickauth_flutter/src/core/storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Future<QuickAuthStorage> _storage() async {

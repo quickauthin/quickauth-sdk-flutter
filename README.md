@@ -19,14 +19,20 @@ for Flutter apps.
 ## Install
 
 ```bash
-flutter pub add quickauth
+flutter pub add quickauth_flutter
 ```
 
 `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  quickauth: ^0.2.0
+  quickauth_flutter: ^1.1.1
+```
+
+Then import it:
+
+```dart
+import 'package:quickauth_flutter/quickauth_flutter.dart';
 ```
 
 ## How auth works (read this first)
