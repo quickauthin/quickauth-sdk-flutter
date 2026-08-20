@@ -3,6 +3,25 @@
 All notable changes to the QuickAuth Flutter SDK are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.1] — 2026-08-20
+
+### Added
+- Consent-gated `deviceInfo` capture on `initiate` and `submitOtp`. When
+  DPDP/GDPR consent has been granted via `QuickAuth.consent`, the SDK now
+  attaches an opaque `deviceInfo` block (platform, OS version, locale,
+  timezone, app version/build/id) to the auth request — matching the web
+  and iOS SDKs' V48 audit metadata. Consent off → nothing is sent. Capture
+  failures are swallowed and never block authentication.
+
+### Fixed
+- Widened the `package_info_plus` constraint from `^5.0.0` to
+  `>=5.0.0 <11.0.0`. The old upper bound (`<6.0.0`) forced a version
+  conflict for host apps already on `package_info_plus` 6.x–10.x,
+  blocking `flutter pub get`. The SDK only reads `PackageInfo.version`,
+  `.buildNumber`, and `.packageName`, which are unchanged across all
+  supported majors, so no code changes were needed. Verified against
+  `package_info_plus` 10.x (full test suite green).
+
 ## [1.0.0] — 2026-05-23
 
 ### Changed
