@@ -11,6 +11,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `quickauth_flutter:` in your `pubspec.yaml`. The public API is unchanged.
 
 ### Added
+- **Publishable-key auth mode (preview)** — `QuickAuth.init(publishableKey: 'pk_live_…')`
+  for a zero-backend quick start. The SDK sends the key as `X-QuickAuth-Key`
+  (plus Android package / iOS bundle for app-locking) instead of a
+  server-minted session token. `onTokenExpiry` is now optional; exactly one of
+  `publishableKey` or `onTokenExpiry` must be supplied. The session-token flow
+  is unchanged. Note: requires backend publishable-key support to be enabled —
+  inert until you're issued a `pk_` key.
 - Consent-gated `deviceInfo` capture on `initiate` and `submitOtp`. When
   DPDP/GDPR consent has been granted via `QuickAuth.consent`, the SDK now
   attaches an opaque `deviceInfo` block (platform, OS version, locale,

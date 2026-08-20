@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'config.dart';
 
@@ -194,16 +195,52 @@ class QuickAuthApiClient {
   /// SDK version reported in the `x-quickauth-sdk` header.
   static const String sdkVersion = '0.2.0';
 
-  /// Headers used for every authenticated request. Includes the freshly
-  /// resolved bearer token.
+  /// Cached app-identity headers (Android package / iOS bundle) — captured
+  /// once and reused for every publishable-key request.
+  Future<Map<String, String>>? _appIdentity;
+
+  /// Headers used for every authenticated request.
+  ///
+  /// In **publishable-key mode** this sends `X-QuickAuth-Key` plus the app's
+  /// identity (Android package / iOS bundle; web relies on the browser-set
+  /// `Origin`) — no bearer token. Otherwise it resolves and attaches the
+  /// session JWT as `Authorization: Bearer …`.
   Future<Map<String, String>> _authedHeaders() async {
-    final token = await _tokens.getToken();
-    return <String, String>{
+    final base = <String, String>{
       'content-type': 'application/json',
       'accept': 'application/json',
-      'authorization': 'Bearer $token',
       'x-quickauth-sdk': 'flutter/${QuickAuthApiClient.sdkVersion}',
     };
+    if (config.isPublishableKeyMode) {
+      base['x-quickauth-key'] = config.publishableKey!;
+      base.addAll(await (_appIdentity ??= _captureAppIdentity()));
+      return base;
+    }
+    final token = await _tokens.getToken();
+    base['authorization'] = 'Bearer $token';
+    return base;
+  }
+
+  /// Best-effort capture of the host app's identity for publishable-key
+  /// app-locking. Never throws — a missing identity just omits the header and
+  /// the backend falls back to its configured policy.
+  static Future<Map<String, String>> _captureAppIdentity() async {
+    if (kIsWeb) return const <String, String>{}; // Origin is set by the browser
+    try {
+      final info = await PackageInfo.fromPlatform();
+      final id = info.packageName;
+      if (id.isEmpty) return const <String, String>{};
+      switch (defaultTargetPlatform) {
+        case TargetPlatform.android:
+          return <String, String>{'x-quickauth-package': id};
+        case TargetPlatform.iOS:
+          return <String, String>{'x-quickauth-bundle': id};
+        default:
+          return const <String, String>{};
+      }
+    } catch (_) {
+      return const <String, String>{};
+    }
   }
 
   /// POST [path] with a JSON [body] and decode the JSON response.

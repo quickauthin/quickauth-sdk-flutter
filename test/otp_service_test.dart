@@ -53,7 +53,7 @@ QuickAuthConfig _config({AuthEventHandler? onAuthEvent}) => QuickAuthConfig(
 
 QuickAuthApiClient _client(MockClient mock, QuickAuthConfig cfg, {String? seedToken}) {
   final tm = TokenManager(
-    provider: cfg.onTokenExpiry,
+    provider: cfg.onTokenExpiry!,
     initialToken: seedToken ??
         _fakeJwt(
           exp: DateTime.now()

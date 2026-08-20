@@ -28,7 +28,7 @@ String _fakeJwt() {
 QuickAuthApiClient _client(MockClient mock) {
   final cfg = QuickAuthConfig(onTokenExpiry: () async => _fakeJwt());
   final tm = TokenManager(
-    provider: cfg.onTokenExpiry,
+    provider: cfg.onTokenExpiry!,
     initialToken: _fakeJwt(),
   );
   return QuickAuthApiClient(

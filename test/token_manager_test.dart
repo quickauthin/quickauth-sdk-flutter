@@ -136,7 +136,7 @@ void main() {
         onTokenExpiry: () async => seed,
         initialToken: seed,
       );
-      final tm = TokenManager(provider: cfg.onTokenExpiry, initialToken: seed);
+      final tm = TokenManager(provider: cfg.onTokenExpiry!, initialToken: seed);
       final client =
           QuickAuthApiClient(config: cfg, tokenManager: tm, httpClient: mock);
       await client.post('/v1/sdk/auth/initiate', <String, dynamic>{'a': 1});
@@ -154,7 +154,7 @@ void main() {
         return providerCalls == 1 ? t1 : t2;
       });
       final tm =
-          TokenManager(provider: cfg.onTokenExpiry, initialToken: null);
+          TokenManager(provider: cfg.onTokenExpiry!, initialToken: null);
       final headers = <String>[];
       final mock = MockClient((req) async {
         headers.add(req.headers['authorization']!);
@@ -174,7 +174,7 @@ void main() {
     test('does not retry beyond once on consecutive 401s', () async {
       final t1 = _jwtWithExp(_nowSec(const Duration(minutes: 10)));
       final cfg = QuickAuthConfig(onTokenExpiry: () async => t1);
-      final tm = TokenManager(provider: cfg.onTokenExpiry);
+      final tm = TokenManager(provider: cfg.onTokenExpiry!);
       var calls = 0;
       final mock = MockClient((req) async {
         calls++;

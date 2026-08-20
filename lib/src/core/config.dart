@@ -34,7 +34,8 @@ class QuickAuthConfig {
   /// Creates a config snapshot.
   QuickAuthConfig({
     this.apiBaseUrl = defaultApiBaseUrl,
-    required this.onTokenExpiry,
+    this.onTokenExpiry,
+    this.publishableKey,
     this.initialToken,
     this.unsafeDirectClientId,
     this.unsafeDirectClientSecret,
@@ -48,14 +49,28 @@ class QuickAuthConfig {
   /// [defaultApiBaseUrl].
   final String apiBaseUrl;
 
-  /// Required callback the SDK invokes to fetch a fresh session JWT from the
-  /// customer's backend.
+  /// Callback the SDK invokes to fetch a fresh session JWT from the customer's
+  /// backend (the hardened "session-token" auth mode).
   ///
   /// In production the customer hosts a tiny endpoint (e.g.
   /// `GET /api/quickauth-token`) that proxies to QuickAuth's
   /// `POST /v1/sdk/session` server-to-server. The callback must return the
   /// `sessionToken` string from that response.
-  final TokenProvider onTokenExpiry;
+  ///
+  /// Exactly one of [onTokenExpiry] or [publishableKey] must be supplied. Use
+  /// [publishableKey] for the zero-backend quick-start; use [onTokenExpiry]
+  /// when you want the extra-hardened server-minted-token flow.
+  final TokenProvider? onTokenExpiry;
+
+  /// Publishable key (`pk_live_…` / `pk_test_…`) — the in-app-safe credential
+  /// for the zero-backend auth mode.
+  ///
+  /// Unlike the client **secret**, a publishable key is *designed* to ship
+  /// inside the app: on the backend it is scoped to OTP initiate/verify only,
+  /// locked to your registered app identity (Android package / iOS bundle /
+  /// web origin), and rate-limited. When set, the SDK sends it as
+  /// `X-QuickAuth-Key` on `/v1/sdk/auth/*` and no session token is needed.
+  final String? publishableKey;
 
   /// Optional pre-fetched JWT to seed the [TokenManager]. Useful when the
   /// host app already holds a freshly-minted token at boot and wants to skip
@@ -93,6 +108,10 @@ class QuickAuthConfig {
       (unsafeDirectClientId != null && unsafeDirectClientId!.isNotEmpty) &&
       (unsafeDirectClientSecret != null &&
           unsafeDirectClientSecret!.isNotEmpty);
+
+  /// Whether the SDK is using the publishable-key (zero-backend) auth mode.
+  bool get isPublishableKeyMode =>
+      publishableKey != null && publishableKey!.isNotEmpty;
 }
 
 /// OTP delivery channel sent to `/v1/sdk/auth/initiate`.

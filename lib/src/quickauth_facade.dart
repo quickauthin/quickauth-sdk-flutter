@@ -65,7 +65,14 @@ class QuickAuth {
 
   /// Initialise the SDK. Idempotent — repeated calls update the cached config.
   ///
-  /// [onTokenExpiry] — required callback that returns a fresh QuickAuth
+  /// Choose **one** auth mode:
+  /// - [publishableKey] — recommended, zero-backend. Pass your `pk_live_…` key;
+  ///   it is safe to embed in the app (scoped to OTP, app-locked, rate-limited
+  ///   on the backend). No token endpoint required.
+  /// - [onTokenExpiry] — extra-hardened. Your backend mints short-lived session
+  ///   JWTs via `POST /v1/sdk/session`; the SDK calls this to refresh them.
+  ///
+  /// [onTokenExpiry] — callback that returns a fresh QuickAuth
   ///   session JWT. The customer's backend must mint this JWT via a
   ///   server-to-server `POST /v1/sdk/session` call (using the customer's
   ///   QuickAuth client secret). The SDK will invoke this callback whenever
@@ -87,7 +94,8 @@ class QuickAuth {
   ///
   /// [debug] — enable verbose `debugPrint` output.
   static Future<QuickAuth> init({
-    required TokenProvider onTokenExpiry,
+    TokenProvider? onTokenExpiry,
+    String? publishableKey,
     String apiBaseUrl = QuickAuthConfig.defaultApiBaseUrl,
     String? initialToken,
     String? unsafeDirectClientId,
@@ -99,6 +107,7 @@ class QuickAuth {
     final cfg = QuickAuthConfig(
       apiBaseUrl: apiBaseUrl,
       onTokenExpiry: onTokenExpiry,
+      publishableKey: publishableKey,
       initialToken: initialToken,
       unsafeDirectClientId: unsafeDirectClientId,
       unsafeDirectClientSecret: unsafeDirectClientSecret,
@@ -106,20 +115,38 @@ class QuickAuth {
       onAuthEvent: onAuthEvent,
     );
 
+    // Exactly one auth mode must be chosen.
+    if (!cfg.isPublishableKeyMode && !cfg.isUnsafeDirect && onTokenExpiry == null) {
+      throw ArgumentError(
+        'QuickAuth.init requires an auth mode: pass publishableKey (recommended, '
+        'zero-backend) or onTokenExpiry (server-minted session tokens).',
+      );
+    }
+    if (cfg.isPublishableKeyMode && onTokenExpiry != null) {
+      throw ArgumentError(
+        'Pass either publishableKey or onTokenExpiry — not both.',
+      );
+    }
+
     final inst = _instance ??= QuickAuth._();
     inst._config = cfg;
 
-    // Resolve the effective TokenProvider. In unsafe-direct mode we replace
-    // the customer-supplied callback with one that calls /v1/sdk/session
-    // directly using X-Client-Id / X-Client-Secret headers.
+    // Resolve the effective TokenProvider used by the session-token modes. In
+    // publishable-key mode no bearer token is ever fetched, so the provider is
+    // a guard that must never be invoked. In unsafe-direct mode we mint tokens
+    // directly with X-Client-Id / X-Client-Secret.
     final TokenProvider effectiveProvider;
-    if (cfg.isUnsafeDirect) {
+    if (cfg.isPublishableKeyMode) {
+      effectiveProvider = () => throw StateError(
+            'No session token in publishable-key mode',
+          );
+    } else if (cfg.isUnsafeDirect) {
       // ignore: avoid_print
       print(
           '[QuickAuth] ⚠️ UNSAFE mode: client_secret embedded; for trusted-enterprise only');
       effectiveProvider = () => _mintTokenUnsafe(inst);
     } else {
-      effectiveProvider = onTokenExpiry;
+      effectiveProvider = onTokenExpiry!;
     }
 
     inst._tokens = TokenManager(
@@ -192,6 +219,7 @@ class QuickAuth {
     _i._config = QuickAuthConfig(
       apiBaseUrl: cfg.apiBaseUrl,
       onTokenExpiry: cfg.onTokenExpiry,
+      publishableKey: cfg.publishableKey,
       initialToken: cfg.initialToken,
       unsafeDirectClientId: cfg.unsafeDirectClientId,
       unsafeDirectClientSecret: cfg.unsafeDirectClientSecret,
