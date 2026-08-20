@@ -140,6 +140,7 @@ class QuickAuth {
       smsRetriever: smsRetriever,
       storage: inst._storage,
       configProvider: () => inst._config,
+      consent: inst._consent,
     );
     inst._whatsapp = WhatsAppLogin();
     inst._attribution = QuickAuthAttributionService(

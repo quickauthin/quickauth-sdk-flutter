@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import '../attribution/device_info.dart';
 import '../core/api_client.dart';
 import '../core/config.dart';
+import '../core/consent.dart';
 import '../core/storage.dart';
 import 'auth_event.dart';
 import 'sms_retriever.dart';
@@ -87,15 +89,30 @@ class QuickAuthOtpService {
     required SmsRetriever smsRetriever,
     required QuickAuthStorage storage,
     required QuickAuthConfig Function() configProvider,
+    required QuickAuthConsent consent,
   })  : _api = apiClient,
         _sms = smsRetriever,
         _storage = storage,
-        _config = configProvider;
+        _config = configProvider,
+        _consent = consent;
 
   final QuickAuthApiClient _api;
   final SmsRetriever _sms;
   final QuickAuthStorage _storage;
   final QuickAuthConfig Function() _config;
+  final QuickAuthConsent _consent;
+
+  /// Mirrors web + iOS: include the opaque `deviceInfo` block (V48 audit
+  /// metadata, never used in the OneTap trust decision) only once DPDP/GDPR
+  /// consent has been granted. A failure here must never block auth.
+  Future<Map<String, dynamic>?> _deviceInfoIfConsented() async {
+    if (!_consent.get()) return null;
+    try {
+      return await QuickAuthDeviceInfo.capture();
+    } catch (_) {
+      return null;
+    }
+  }
 
   _SessionState _state = _Idle();
   int _attemptCounter = 0;
@@ -151,6 +168,8 @@ class QuickAuthOtpService {
     if (deviceToken != null && deviceToken.isNotEmpty) {
       body['deviceToken'] = deviceToken;
     }
+    final deviceInfo = await _deviceInfoIfConsented();
+    if (deviceInfo != null) body['deviceInfo'] = deviceInfo;
 
     Map<String, dynamic> json;
     try {
@@ -212,6 +231,8 @@ class QuickAuthOtpService {
     if (deviceToken != null && deviceToken.isNotEmpty) {
       body['deviceToken'] = deviceToken;
     }
+    final deviceInfo = await _deviceInfoIfConsented();
+    if (deviceInfo != null) body['deviceInfo'] = deviceInfo;
 
     Map<String, dynamic> json;
     try {

@@ -68,6 +68,7 @@ QuickAuthApiClient _client(MockClient mock, QuickAuthConfig cfg, {String? seedTo
 QuickAuthOtpService _service(MockClient mock, {
   AuthEventHandler? onAuthEvent,
   String? seedToken,
+  QuickAuthConsent? consent,
 }) {
   late QuickAuthConfig cfg;
   cfg = _config(onAuthEvent: onAuthEvent);
@@ -76,6 +77,7 @@ QuickAuthOtpService _service(MockClient mock, {
     smsRetriever: _FakeSmsRetriever(),
     storage: QuickAuthStorage(),
     configProvider: () => cfg,
+    consent: consent ?? QuickAuthConsent(storage: QuickAuthStorage(), initial: false),
   );
 }
 
@@ -119,6 +121,50 @@ void main() {
       expect(ev.sessionId, 'sess_abc');
       expect(ev.channel, OtpChannel.whatsapp);
       expect(ev.expiresIn, 300);
+    });
+
+    test('omits deviceInfo when consent has not been granted', () async {
+      late http.Request lastRequest;
+      final mock = MockClient((req) async {
+        lastRequest = req;
+        return http.Response(
+          jsonEncode(<String, dynamic>{
+            'state': 'OTP_SENT',
+            'sessionId': 'sess_nc',
+            'expiresIn': 300,
+          }),
+          200,
+          headers: <String, String>{'content-type': 'application/json'},
+        );
+      });
+      final service = _service(mock);
+      await service.initiate(phone: '+919876543210');
+
+      final body = jsonDecode(lastRequest.body) as Map<String, dynamic>;
+      expect(body.containsKey('deviceInfo'), isFalse);
+    });
+
+    test('attaches deviceInfo once consent is granted', () async {
+      late http.Request lastRequest;
+      final mock = MockClient((req) async {
+        lastRequest = req;
+        return http.Response(
+          jsonEncode(<String, dynamic>{
+            'state': 'OTP_SENT',
+            'sessionId': 'sess_c',
+            'expiresIn': 300,
+          }),
+          200,
+          headers: <String, String>{'content-type': 'application/json'},
+        );
+      });
+      final consent = QuickAuthConsent(storage: QuickAuthStorage(), initial: true);
+      final service = _service(mock, consent: consent);
+      await service.initiate(phone: '+919876543210');
+
+      final body = jsonDecode(lastRequest.body) as Map<String, dynamic>;
+      expect(body['deviceInfo'], isA<Map<String, dynamic>>());
+      expect((body['deviceInfo'] as Map<String, dynamic>)['platform'], isNotNull);
     });
 
     test('emits Verified directly when backend reports OneTap', () async {
