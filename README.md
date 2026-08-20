@@ -1,20 +1,42 @@
-# QuickAuth Flutter SDK
+# QuickAuth — Flutter Phone Authentication & OTP SDK
 
-Phone OTP (SMS / WhatsApp) authentication and WhatsApp marketing attribution
-for Flutter apps.
+[![pub package](https://img.shields.io/pub/v/quickauth_flutter.svg)](https://pub.dev/packages/quickauth_flutter)
+[![pub points](https://img.shields.io/pub/points/quickauth_flutter)](https://pub.dev/packages/quickauth_flutter/score)
+[![likes](https://img.shields.io/pub/likes/quickauth_flutter)](https://pub.dev/packages/quickauth_flutter/score)
+[![platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-blue.svg)](https://pub.dev/packages/quickauth_flutter)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-```
-[Q] quickauth — drop-in OTP + click attribution for Flutter
-```
+**Passwordless phone number authentication for Flutter** — verify users with a
+one-time password (OTP) delivered over **SMS or WhatsApp**, with **OneTap silent
+re-authentication**, automatic **SMS autofill on Android**, native **OTP autofill
+on iOS**, and built-in **DPDP / GDPR consent** gating. QuickAuth is a
+verification provider (Twilio-Verify style): your backend stays the source of
+truth for user sessions, so you never ship a secret in your app.
 
-- Twilio-Verify-style ephemeral session tokens — your client secret never
-  leaves your backend.
-- Headless mode for custom UIs, component mode for drop-in widgets.
-- Android SMS Retriever (auto-read OTPs). iOS uses native `oneTimeCode`
-  autofill.
-- Click-to-WhatsApp deep links.
-- Launch attribution + conversion events with built-in DPDP / GDPR consent
-  gating.
+> Looking for phone login, OTP verification, WhatsApp OTP, passwordless auth, or
+> 2FA in your Flutter app? That's exactly what `quickauth_flutter` does.
+
+- 📱 **Phone OTP login** over **SMS** and **WhatsApp** (auto channel selection with fallback)
+- ⚡ **OneTap** — returning users on a trusted device are verified with no OTP to type
+- 🔒 **Secret-safe** — short-lived session tokens minted by *your* backend; client secret never leaves your server
+- 🎯 **Headless or drop-in UI** — build your own screens, or use the ready-made login button & OTP field
+- 🤖 **Android SMS Retriever** auto-reads the code; **iOS** uses native `oneTimeCode` autofill
+- 💬 **Click-to-WhatsApp** login deep links
+- 📊 **Attribution & conversion events** with consent-gated device metadata
+- 🇮🇳 **DPDP** + 🇪🇺 **GDPR** consent gating out of the box
+
+## Table of contents
+
+- [Install](#install)
+- [How authentication works](#how-authentication-works-read-this-first)
+- [Quick start (headless)](#quick-start-headless)
+- [OneTap silent re-auth](#onetap-silent-re-authentication)
+- [Drop-in UI widgets](#drop-in-ui-widgets)
+- [WhatsApp login](#whatsapp-login)
+- [Consent (DPDP / GDPR)](#consent-dpdp--gdpr)
+- [Platform setup](#platform-setup)
+- [Backend: minting a session token](#backend-minting-a-session-token)
+- [FAQ](#faq)
 
 ## Install
 
@@ -22,179 +44,104 @@ for Flutter apps.
 flutter pub add quickauth_flutter
 ```
 
-`pubspec.yaml`:
-
 ```yaml
+# pubspec.yaml
 dependencies:
   quickauth_flutter: ^1.1.1
 ```
-
-Then import it:
 
 ```dart
 import 'package:quickauth_flutter/quickauth_flutter.dart';
 ```
 
-## How auth works (read this first)
+## How authentication works (read this first)
 
-QuickAuth follows the same pattern Twilio Verify uses for mobile SDKs:
+QuickAuth **verifies phone numbers** — it does not create sessions for you. That
+keeps you in control of your users and keeps your API secret off the device:
 
-1. **Your backend** mints a short-lived (10 min) `sessionToken` JWT by
-   calling `POST https://api.quickauth.in/v1/sdk/session` server-to-server,
-   authenticated with your **client secret** (which lives only on your
-   server).
-2. **The SDK** uses that JWT as `Authorization: Bearer <sessionToken>` for
-   every QuickAuth API call.
-3. About 30 seconds before the token expires the SDK calls your
-   `onTokenExpiry` callback, which fetches a fresh token from your backend.
+1. **Your backend** mints a short-lived (10 min) `sessionToken` by calling
+   `POST https://api.quickauth.in/v1/sdk/session` server-to-server with your
+   **client secret** (which lives only on your server).
+2. **The SDK** uses that token to run the OTP flow directly against QuickAuth.
+3. On success the SDK returns a `requestId`. **Your backend** confirms it via
+   `GET /v1/auth/status?requestId=…`, then looks up / creates the user and mints
+   **your own** session. You own sessions, roles, and sign-out — forever.
 
-This way the client secret never ships in the app binary and tokens are
-always rotatable.
+## Quick start (headless)
 
-## Quick start — headless
+Build your own UI and let the SDK drive the state machine through typed events.
 
 ```dart
+// 1. Initialise once at app startup.
 await QuickAuth.init(
   onTokenExpiry: () async {
     // Hit YOUR backend, which proxies to QuickAuth's /v1/sdk/session.
-    final res = await myApi.fetch('/api/quickauth-token');
+    final res = await myApi.get('/api/quickauth-token');
     return res.sessionToken as String;
+  },
+  onAuthEvent: (event) {
+    switch (event) {
+      case OtpSentEvent():     showOtpScreen();               // code was sent
+      case OtpAutoReadEvent(): prefillCode(event.code);        // Android auto-read the SMS
+      case VerifiedEvent():    finishLogin(event.requestId);   // ✅ verified (OTP *or* OneTap)
+      case OtpFailedEvent():   showError(event.message);        // wrong code — retryable
+      case AuthErrorEvent():   showError(event.message);        // network / rate-limit
+    }
   },
 );
 
-final session = await QuickAuth.auth.startOTP(
+// 2. Send the OTP (E.164 phone number required).
+await QuickAuth.auth.initiate(
   phone: '+919876543210',
-  channel: OtpChannel.auto,
+  channel: OtpChannel.auto, // or OtpChannel.sms / OtpChannel.whatsapp
 );
 
-final result = await QuickAuth.auth.verifyOTP(
-  sessionId: session.sessionId,
-  code: '123456',
-);
-// result.verified == true, result.requestId == "req_…", result.message == "Verified successfully"
-//
-// Forward result.requestId to YOUR backend, which confirms with QuickAuth via
-// GET /v1/auth/status?requestId=... (X-Client-Id / X-Client-Secret) and mints
-// its own session JWT against its own user table.
-// See https://quickauth.in/docs/backend
+// 3. Submit the code the user typed.
+await QuickAuth.auth.submitOtp('123456');
+
+// 4. On VerifiedEvent, confirm requestId on YOUR backend and start your session.
 ```
 
-Auto-read inbound OTPs on Android:
+## OneTap silent re-authentication
+
+OneTap is **automatic** — there's no flag to enable. On the first successful
+login the SDK stores a device token. On the next `initiate()` for a trusted
+device, QuickAuth returns `VERIFIED` immediately, so `VerifiedEvent` fires
+**without sending an OTP**. Your headless handler already covers it:
 
 ```dart
-final sub = QuickAuth.auth.observeOTP().listen((code) {
-  controller.text = code;
-});
+case VerifiedEvent(): finishLogin(event.requestId); // fires instantly for trusted devices
 ```
 
-## Server-side: minting `sessionToken`
-
-Below is a minimal **Dart Frog / Shelf** example for the customer-side
-endpoint that the SDK's `onTokenExpiry` callback hits.
-
-### Dart Frog
+Sign the device out (disable OneTap for next time) with:
 
 ```dart
-// routes/api/quickauth-token.dart
-import 'dart:convert';
-
-import 'package:dart_frog/dart_frog.dart';
-import 'package:http/http.dart' as http;
-
-const _quickAuthBase = 'https://api.quickauth.in';
-
-Future<Response> onRequest(RequestContext context) async {
-  // 1. Authenticate the caller — only logged-in users may mint tokens.
-  final user = await context.read<AuthService>().currentUser(context.request);
-  if (user == null) {
-    return Response(statusCode: 401);
-  }
-
-  // 2. Server-to-server call to QuickAuth using YOUR client secret.
-  final res = await http.post(
-    Uri.parse('$_quickAuthBase/v1/sdk/session'),
-    headers: <String, String>{
-      'content-type': 'application/json',
-      'x-client-id': const String.fromEnvironment('QUICKAUTH_CLIENT_ID'),
-      'x-client-secret': const String.fromEnvironment('QUICKAUTH_CLIENT_SECRET'),
-    },
-    body: jsonEncode(<String, dynamic>{
-      // Optional — bind the session to your user for audit logs.
-      'subject': user.id,
-    }),
-  );
-  if (res.statusCode != 200) {
-    return Response(statusCode: 502, body: res.body);
-  }
-
-  final json = jsonDecode(res.body) as Map<String, dynamic>;
-  // QuickAuth returns: { "sessionToken": "<jwt>", "expiresIn": 600 }
-  return Response.json(body: <String, dynamic>{
-    'sessionToken': json['sessionToken'],
-    'expiresIn':    json['expiresIn'],
-  });
-}
+await QuickAuth.auth.reset(forgetDevice: true);
 ```
 
-### Plain Shelf
+## Drop-in UI widgets
 
-```dart
-import 'dart:convert';
-
-import 'package:shelf/shelf.dart';
-import 'package:shelf_router/shelf_router.dart';
-import 'package:http/http.dart' as http;
-
-final router = Router()
-  ..get('/api/quickauth-token', (Request req) async {
-    final user = await currentUserOrNull(req);
-    if (user == null) return Response.unauthorized('login required');
-
-    final res = await http.post(
-      Uri.parse('https://api.quickauth.in/v1/sdk/session'),
-      headers: <String, String>{
-        'content-type': 'application/json',
-        'x-client-id':     Platform.environment['QUICKAUTH_CLIENT_ID']!,
-        'x-client-secret': Platform.environment['QUICKAUTH_CLIENT_SECRET']!,
-      },
-      body: jsonEncode(<String, dynamic>{'subject': user.id}),
-    );
-    if (res.statusCode != 200) {
-      return Response.internalServerError(body: res.body);
-    }
-    final json = jsonDecode(res.body) as Map<String, dynamic>;
-    return Response.ok(jsonEncode(<String, dynamic>{
-      'sessionToken': json['sessionToken'],
-      'expiresIn':    json['expiresIn'],
-    }), headers: <String, String>{'content-type': 'application/json'});
-  });
-```
-
-Keep `QUICKAUTH_CLIENT_SECRET` in your server's secret manager — never embed
-it in the app.
-
-## Quick start — component mode
+Prefer not to build screens? Use the bundled components:
 
 ```dart
 QuickAuthLoginButton(
   phone: '+919876543210',
-  text: 'Continue with QuickAuth',
-  style: QuickAuthButtonStyle.primary,
-  onSuccess: (jwt) => Navigator.of(context).pushReplacementNamed('/home'),
-  onError:   (e)   => debugPrint('$e'),
-)
-```
+  text: 'Continue with phone',
+  onSuccess: (requestId) => Navigator.of(context).pushReplacementNamed('/home'),
+  onError:   (e)         => debugPrint('$e'),
+);
 
-```dart
 QuickAuthOtpField(
   controller: _otp,
   digitCount: 6,
   autoFocus: true,
-  onCodeFilled: (code) => verify(code),
-)
+  onCodeFilled: (code) => QuickAuth.auth.submitOtp(code),
+);
 ```
 
 ## WhatsApp login
+
+Open a click-to-WhatsApp login conversation:
 
 ```dart
 await QuickAuth.auth.startWhatsAppLogin(
@@ -202,120 +149,63 @@ await QuickAuth.auth.startWhatsAppLogin(
 );
 ```
 
-## Attribution
-
-```dart
-final attribution = await QuickAuth.attribution.captureLaunch(
-  launchUri: Uri.parse(launchUrl),
-);
-await QuickAuth.attribution.trackConversion(
-  event: 'signup',
-  value: 0,
-  currency: 'INR',
-);
-```
-
 ## Consent (DPDP / GDPR)
 
-The SDK never sends analytics calls until consent is granted.
+The SDK sends **no** analytics or device metadata until consent is granted.
 
 ```dart
-QuickAuth.consent.set(true);   // grant
-QuickAuth.consent.set(false);  // revoke (also wipes qa_clid)
+QuickAuth.consent.set(true);  // grant  — queued events replay automatically
+QuickAuth.consent.set(false); // revoke — clears stored click id
 ```
 
-Calls made while denied are queued and replayed automatically when consent
-flips to `true`.
+## Platform setup
 
-## Android setup
+| Platform | Minimum | Notes |
+|---|---|---|
+| **Android** | `minSdk 21` | Add `<uses-permission android:name="android.permission.INTERNET"/>`. SMS auto-read uses the SMS Retriever API — your OTP template must end with the 11-char app hash from `QuickAuth.auth.getAppHash()`. |
+| **iOS** | iOS 12+ | Nothing required — `QuickAuthOtpField` declares `AutofillHints.oneTimeCode` for native OTP autofill. |
 
-Add to `android/app/src/main/AndroidManifest.xml` (only if you don't already
-have it):
+## Backend: minting a session token
 
-```xml
-<uses-permission android:name="android.permission.INTERNET" />
-```
-
-The SMS Retriever API requires the OTP message body to end with the 11-char
-**app-signing hash** for your build. Print it on first run:
+The SDK's `onTokenExpiry` callback should hit an endpoint on **your** server
+that proxies to QuickAuth using your client secret:
 
 ```dart
-final hash = await QuickAuth.auth.getAppHash();
-debugPrint('Paste this into your QuickAuth template: $hash');
-```
-
-Then paste the hash into your QuickAuth dashboard SMS template body. Each
-build (debug / release / Play-signed) has a different hash.
-
-## iOS setup
-
-Nothing to do — iOS handles OTP autofill natively. Our `QuickAuthOtpField`
-already declares `autofillHints: [AutofillHints.oneTimeCode]`.
-
-For the strongest match, configure Associated Domains pointing at your
-`apple-app-site-association` so OTPs delivered via WhatsApp / iMessage from
-your registered sender autofill instantly. This is optional.
-
-## API reference
-
-### `QuickAuth.init`
-
-| Parameter                   | Default                    | Notes                                       |
-| --------------------------- | -------------------------- | ------------------------------------------- |
-| `onTokenExpiry`             | required                   | `Future<String> Function()` returning a fresh `sessionToken` |
-| `apiBaseUrl`                | `https://api.quickauth.in` |                                             |
-| `initialToken`              | `null`                     | Pre-warmed JWT to skip the first round-trip |
-| `unsafeDirectClientId`      | `null`                     | **Unsafe** — see below                      |
-| `unsafeDirectClientSecret`  | `null`                     | **Unsafe** — see below                      |
-| `consent`                   | `false`                    | Persisted after first call                  |
-| `debug`                     | `false`                    | Enables `debugPrint` traces                 |
-
-#### Unsafe direct mode (trusted-enterprise only)
-
-If you're shipping a first-party app that you fully control and you're
-willing to embed the QuickAuth client secret in your binary, you can skip
-the customer-backend hop:
-
-```dart
-await QuickAuth.init(
-  onTokenExpiry: () async => '', // ignored when unsafe-direct is set
-  unsafeDirectClientId:     'qa_ci_xxx',
-  unsafeDirectClientSecret: 'qa_cs_xxx',
+// Server-side (Dart Frog / Shelf / any framework)
+final res = await http.post(
+  Uri.parse('https://api.quickauth.in/v1/sdk/session'),
+  headers: {
+    'x-client-id':     env['QUICKAUTH_CLIENT_ID']!,
+    'x-client-secret': env['QUICKAUTH_CLIENT_SECRET']!, // never ship this in the app
+  },
 );
+// → { "sessionToken": "<jwt>", "expiresIn": 600 }
 ```
 
-The SDK will print:
+Full backend guide: <https://quickauth.in/docs/backend>
 
-```
-[QuickAuth] ⚠️ UNSAFE mode: client_secret embedded; for trusted-enterprise only
-```
+## FAQ
 
-Do not enable this in any app shipped to third-party customers.
+**Is this passwordless / 2FA?** Yes — QuickAuth is phone-based passwordless auth
+and works as a second factor. Users prove control of a phone number via an OTP
+sent over SMS or WhatsApp.
 
-### `QuickAuth.auth`
+**Does it issue a login token (JWT)?** No. QuickAuth returns a `requestId` that
+your backend confirms server-to-server, then mints your own session. This keeps
+you the identity owner and keeps your secret off the device.
 
-- `Future<OtpSession> startOTP({required String phone, OtpChannel channel = OtpChannel.auto})`
-- `Future<OtpResult> verifyOTP({required String code, String? sessionId})`
-- `Stream<String> observeOTP()` — Android only; empty stream on iOS
-- `Future<String?> getAppHash()` — Android only
-- `Future<bool> startWhatsAppLogin({required String businessNumber, ...})`
+**Which channels are supported?** SMS and WhatsApp. Use `OtpChannel.auto` to let
+QuickAuth pick the best channel with fallback, or force one explicitly.
 
-### `QuickAuth.attribution`
+**Does OTP autofill work?** Yes — Android via the SMS Retriever API (no SMS
+permission needed) and iOS via native one-time-code autofill.
 
-- `Future<AttributionResult> captureLaunch({Uri? launchUri})`
-- `Future<void> trackConversion({required String event, num value = 0, String currency = 'INR', Map<String, dynamic>? metadata})`
-- `Future<String?> qaClid()`
+## Links
 
-### Widgets
-
-- `QuickAuthLoginButton` — opens an OTP sheet, returns a JWT
-- `QuickAuthOtpField`    — pin-style cells with auto-fill
-
-### Theme
-
-`QuickAuthColors`, `QuickAuthTextStyles`, `QuickAuthButtonStyle` —
-all values mirror the brand tokens in `quickauth-website/src/styles/tokens.css`.
+- 🌐 Website: <https://quickauth.in>
+- 📚 Docs: <https://quickauth.in/docs>
+- 🐛 Issues: <https://github.com/quickauthin/quickauth-sdk-flutter/issues>
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE) © QuickAuth
