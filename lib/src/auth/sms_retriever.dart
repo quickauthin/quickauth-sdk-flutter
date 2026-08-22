@@ -60,14 +60,47 @@ class SmsRetriever {
         .receiveBroadcastStream()
         .map((dynamic e) => e?.toString() ?? '')
         .where((String s) => s.isNotEmpty)
-        .map(_extractCode)
+        .map(extractCode)
         .where((String s) => s.isNotEmpty);
   }
 
-  static final RegExp _digits = RegExp(r'\d{4,8}');
+  /// Keyword-anchored code, e.g. "your OTP is 483920" or "code: 4821".
+  ///
+  /// Only punctuation, whitespace and a short "is"/"are" may sit between the keyword and the
+  /// digits. A looser gap swallows the wrong number in bodies like
+  /// "Your OTP for order 4471029 is 483920", where an unrelated reference number is the nearer
+  /// match — there the gap fails and we fall through to [_fallbackCode].
+  static final RegExp _keywordCode = RegExp(
+    r'(?:otp|code|pin|password)[\s:=.,\-\u2013\u2014]{0,6}(?:is|are)?'
+    r'[\s:=.,\-\u2013\u2014]{0,6}\b(\d{4,8})\b',
+    caseSensitive: false,
+  );
 
-  static String _extractCode(String body) {
-    final m = _digits.firstMatch(body);
-    return m?.group(0) ?? '';
+  /// Any standalone 4-8 digit run. The word boundaries keep this off part of a longer run, so
+  /// 10-digit mobile numbers and 12-digit E.164 numbers are skipped rather than truncated into
+  /// something that looks like a plausible code.
+  static final RegExp _fallbackCode = RegExp(r'\b(\d{4,8})\b');
+
+  /// The 11-char app hash that terminates every SMS Retriever body. It is base64 over
+  /// [A-Za-z0-9+/], so it can contain a digit run flanked by `+` or `/` that reads exactly like
+  /// a standalone code. Strip it before scanning.
+  static final RegExp _appHashSuffix = RegExp(r'\s+[A-Za-z0-9+/]{11}\s*$');
+
+  /// Pull the OTP out of an SMS body.
+  ///
+  /// Was `firstMatch` over a bare `\d{4,8}`, which returned the first digit run in the
+  /// message — so "Your OTP for order 4471029 is 483920" auto-filled the order number and the
+  /// user watched the wrong code appear in the field.
+  ///
+  /// Prefers a keyword-anchored match; otherwise takes the **last** standalone run. Last, not
+  /// first: senders put reference numbers, order ids and amounts ahead of the code far more
+  /// often than after it.
+  @visibleForTesting
+  static String extractCode(String body) {
+    final stripped = body.replaceAll(_appHashSuffix, '');
+    final keyed = _keywordCode.allMatches(stripped);
+    if (keyed.isNotEmpty) return keyed.last.group(1) ?? '';
+    final runs = _fallbackCode.allMatches(stripped);
+    return runs.isEmpty ? '' : (runs.last.group(1) ?? '');
   }
 }
