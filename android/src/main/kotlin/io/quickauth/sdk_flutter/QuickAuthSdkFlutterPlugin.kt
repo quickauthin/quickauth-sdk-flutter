@@ -40,12 +40,17 @@ import java.security.MessageDigest
  */
 class QuickAuthSdkFlutterPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
+    // The receiver runs on a binder thread; Flutter sinks must be touched from main.
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     private lateinit var methodChannel: MethodChannel
     private lateinit var eventChannel: EventChannel
     private var context: Context? = null
     private var activity: Activity? = null
     private var smsReceiver: BroadcastReceiver? = null
     private var eventSink: EventChannel.EventSink? = null
+    private lateinit var waEventChannel: EventChannel
+    private var waEventSink: EventChannel.EventSink? = null
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         context = binding.applicationContext
@@ -61,11 +66,30 @@ class QuickAuthSdkFlutterPlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
                 eventSink = null
             }
         })
+
+        waEventChannel = EventChannel(binding.binaryMessenger, WA_EVENT_CHANNEL)
+        waEventChannel.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                waEventSink = events
+                // Attaching also flushes anything the receiver caught while Flutter was not
+                // running — the zero-tap case this whole path exists for.
+                WhatsAppOtpReceiver.setListener { code ->
+                    mainHandler.post { waEventSink?.success(code) }
+                }
+            }
+
+            override fun onCancel(arguments: Any?) {
+                WhatsAppOtpReceiver.setListener(null)
+                waEventSink = null
+            }
+        })
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel.setMethodCallHandler(null)
         eventChannel.setStreamHandler(null)
+        waEventChannel.setStreamHandler(null)
+        WhatsAppOtpReceiver.setListener(null)
         unregisterReceiver()
         context = null
     }
@@ -90,6 +114,12 @@ class QuickAuthSdkFlutterPlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
         when (call.method) {
             "start" -> startSmsRetriever(result)
             "getAppHash" -> result.success(getAppHashes().firstOrNull())
+            // Called when a fresh OTP is requested, so a code held from an earlier attempt
+            // cannot be delivered against the new one.
+            "clearWhatsAppOtp" -> {
+                WhatsAppOtpReceiver.clearPending()
+                result.success(true)
+            }
             "launchUrl" -> {
                 val url = call.argument<String>("url")
                 if (url == null) {
@@ -227,6 +257,16 @@ class QuickAuthSdkFlutterPlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
         private const val TAG = "QuickAuthSdk"
         private const val METHOD_CHANNEL = "io.quickauth/sms_retriever"
         private const val EVENT_CHANNEL = "io.quickauth/sms_retriever/events"
+
+        /**
+         * WhatsApp codes go on their own channel rather than joining the SMS stream.
+         *
+         * <p>The SMS channel emits a whole message body, which Dart then parses for a code.
+         * WhatsApp hands over the code itself. Putting both on one channel would mean the
+         * Dart side could not tell a body from a code without inspecting it, and every
+         * existing listener would start receiving a shape it was never written for.
+         */
+        private const val WA_EVENT_CHANNEL = "io.quickauth/whatsapp_otp/events"
         private const val HASH_LENGTH = 11
         private const val HASH_BYTES = 9
     }

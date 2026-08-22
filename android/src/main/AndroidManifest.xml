@@ -1,5 +1,42 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.quickauth.sdk_flutter">
-    <uses-permission android:name="android.permission.RECEIVE_SMS" />
-    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      No SMS permission, deliberately.
+
+      This declared RECEIVE_SMS, and nothing ever used it: auto-read goes through Google's
+      SmsRetriever, which reads exactly one message — the one ending in this app's own 11-char
+      hash — and needs no permission at all. That is the entire point of the hash.
+
+      Declaring it was not merely redundant. A plugin's manifest is merged into every app that
+      depends on it, so every merchant shipped an SMS permission they did not use, and
+      RECEIVE_SMS is in Google Play's restricted set: an app declaring it must justify the use
+      in a Play Console declaration or be removed from the store. The SDK was creating a review
+      problem for its users in exchange for nothing.
+
+      INTERNET is not declared either — Flutter's own manifest already provides it.
+    -->
+
+    <application>
+        <!--
+          WhatsApp delivers a zero-tap or one-tap code by broadcasting to the app, not by SMS,
+          so SmsRetriever never sees it. Declared statically rather than registered at runtime
+          because zero-tap's whole promise is that the user does nothing: the code can arrive
+          while the app is backgrounded or not running, and a runtime receiver would only exist
+          when the app already does.
+
+          android:permission restricts who may deliver this broadcast to holders of WhatsApp's
+          own permission. Without it the receiver is exported to every app on the device, and
+          any of them could hand our SDK an OTP of their choosing — which the app would then
+          treat as a code the user legitimately received.
+        -->
+        <receiver
+            android:name="io.quickauth.sdk_flutter.WhatsAppOtpReceiver"
+            android:exported="true"
+            android:permission="com.whatsapp.otp.permission.SEND_OTP">
+            <intent-filter>
+                <action android:name="com.whatsapp.otp.OTP_RETRIEVED" />
+            </intent-filter>
+        </receiver>
+    </application>
 </manifest>

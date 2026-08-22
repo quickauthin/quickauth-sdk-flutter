@@ -22,6 +22,7 @@ export 'src/core/api_client.dart' show QuickAuthApiException, TokenManager;
 export 'src/auth/auth_event.dart';
 export 'src/auth/otp_service.dart';
 export 'src/auth/whatsapp_login.dart';
+export 'src/auth/whatsapp_otp_retriever.dart';
 
 // ---- Attribution ----
 export 'src/attribution/attribution_service.dart';
