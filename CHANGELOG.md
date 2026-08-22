@@ -3,6 +3,31 @@
 All notable changes to the QuickAuth Flutter SDK are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.2] — 2026-08-22
+
+### Fixed
+
+- **OTP auto-fill took the first number in the message, not the code.** A body like
+  `"Your OTP for order 4471029 is 483920"` filled in `4471029`. Extraction now anchors on the
+  keyword (`otp`, `code`, `pin`, `password`) and otherwise takes the *last* standalone 4–8
+  digit run — senders put reference numbers ahead of the code far more often than after it.
+  The 11-character SMS Retriever app hash is stripped before scanning, and word boundaries
+  keep a 10-digit mobile number from being truncated into a plausible code.
+- **A 401 retry could surface the wrong exception.** The retry's future was returned from
+  inside a `try` without being awaited, so its own timeout or network failure escaped the
+  handler and reached callers as a raw `TimeoutException` instead of `QuickAuthApiException`.
+
+### Changed
+
+- Cleared every analyzer lint and formatted the package. pub.dev static analysis 30/50 → 50/50
+  (overall 130 → 150).
+
+### Note
+
+`QuickAuth.init(publishableKey: …)` shipped in 1.1.1, but the backend did not recognise the
+`X-QuickAuth-Key` header until 22 August. Zero-backend initialisation returned 401 before that
+date and works from it — no SDK change was involved, so 1.1.1 users need only the server side.
+
 ## [1.1.1] — 2026-08-20
 
 ### Changed
