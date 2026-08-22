@@ -67,7 +67,11 @@ class _QuickAuthLoginButtonState extends State<QuickAuthLoginButton> {
   ({Color bg, Color fg, BorderSide? border}) _palette() {
     switch (widget.style) {
       case QuickAuthButtonStyle.accent:
-        return (bg: QuickAuthColors.accent, fg: QuickAuthColors.ink, border: null);
+        return (
+          bg: QuickAuthColors.accent,
+          fg: QuickAuthColors.ink,
+          border: null
+        );
       case QuickAuthButtonStyle.ghost:
         return (
           bg: QuickAuthColors.card,
@@ -251,7 +255,7 @@ class _OtpSheetState extends State<_OtpSheet> {
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          Text(
+          const Text(
             'Enter the code',
             style: TextStyle(
               fontSize: 22,
@@ -263,7 +267,7 @@ class _OtpSheetState extends State<_OtpSheet> {
           const SizedBox(height: 6),
           Text(
             'Sent to ${widget.phone}',
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 14,
               color: QuickAuthColors.inkSoft,
               fontFamilyFallback: QuickAuthTextStyles.sans,
