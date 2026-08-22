@@ -11,7 +11,8 @@ void main() {
   String extract(String body) => SmsRetriever.extractCode(body);
 
   group('keyword-anchored', () {
-    test('takes the code after the keyword, not the order number before it', () {
+    test('takes the code after the keyword, not the order number before it',
+        () {
       // The case that started this. "4471029" is nearer the start; "483920" is the code.
       expect(extract('Your OTP for order 4471029 is 483920'), '483920');
     });
@@ -39,7 +40,8 @@ void main() {
 
     test('takes the last keyword match when a body carries two', () {
       // A resend or a quoted earlier message. The newest code is the one that works.
-      expect(extract('Old code 111111 expired. Your new code is 222222'), '222222');
+      expect(extract('Old code 111111 expired. Your new code is 222222'),
+          '222222');
     });
   });
 

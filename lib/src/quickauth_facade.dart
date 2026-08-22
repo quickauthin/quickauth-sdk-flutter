@@ -116,7 +116,9 @@ class QuickAuth {
     );
 
     // Exactly one auth mode must be chosen.
-    if (!cfg.isPublishableKeyMode && !cfg.isUnsafeDirect && onTokenExpiry == null) {
+    if (!cfg.isPublishableKeyMode &&
+        !cfg.isUnsafeDirect &&
+        onTokenExpiry == null) {
       throw ArgumentError(
         'QuickAuth.init requires an auth mode: pass publishableKey (recommended, '
         'zero-backend) or onTokenExpiry (server-minted session tokens).',

@@ -6,7 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// SDK never collides with host-app keys.
 class QuickAuthStorage {
   /// Creates a storage helper. Pass [overridePrefs] in tests.
-  QuickAuthStorage({SharedPreferences? overridePrefs}) : _override = overridePrefs;
+  QuickAuthStorage({SharedPreferences? overridePrefs})
+      : _override = overridePrefs;
 
   static const String _prefix = 'io.quickauth.sdk.';
 

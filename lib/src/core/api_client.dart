@@ -303,7 +303,11 @@ class QuickAuthApiClient {
           .timeout(config.requestTimeout);
       if (res.statusCode == 401 && retryOn401) {
         _tokens.invalidate();
-        return _postOnce(path, body, retryOn401: false);
+        // Awaited, not returned bare. Returning the future hands it to the caller
+        // unawaited, so the retry's own timeout or network failure escapes the catch
+        // blocks below and surfaces as a raw TimeoutException instead of the
+        // QuickAuthApiException every caller is written against.
+        return await _postOnce(path, body, retryOn401: false);
       }
       return _handle(res);
     } on TimeoutException {
