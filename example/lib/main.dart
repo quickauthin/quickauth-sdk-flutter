@@ -20,7 +20,9 @@ Future<void> main() async {
   runApp(const ExampleApp());
 }
 
+/// Root of the example app.
 class ExampleApp extends StatelessWidget {
+  /// Creates the example app.
   const ExampleApp({super.key});
 
   @override
@@ -40,7 +42,9 @@ class ExampleApp extends StatelessWidget {
   }
 }
 
+/// Sign-in screen: takes a phone number, then the OTP.
 class HomeScreen extends StatefulWidget {
+  /// Creates the sign-in screen.
   const HomeScreen({super.key});
 
   @override
@@ -48,7 +52,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final TextEditingController _phone = TextEditingController(text: '+919876543210');
+  final TextEditingController _phone =
+      TextEditingController(text: '+919876543210');
   final TextEditingController _otp = TextEditingController();
   // QuickAuth returns a requestId; the merchant's backend confirms server-to-server
   // and mints its own session JWT. This example just shows the requestId.
@@ -146,7 +151,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 phone: _phone.text,
                 text: 'Continue with QuickAuth',
                 style: QuickAuthButtonStyle.primary,
-                onSuccess: (requestId) => setState(() => _requestId = requestId),
+                onSuccess: (requestId) =>
+                    setState(() => _requestId = requestId),
                 onError: (e) => setState(() => _error = e.toString()),
               ),
               const SizedBox(height: 12),
@@ -155,7 +161,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 text: 'Continue with WhatsApp',
                 style: QuickAuthButtonStyle.whatsapp,
                 channel: OtpChannel.whatsapp,
-                onSuccess: (requestId) => setState(() => _requestId = requestId),
+                onSuccess: (requestId) =>
+                    setState(() => _requestId = requestId),
                 onError: (e) => setState(() => _error = e.toString()),
               ),
               const Divider(height: 40),
@@ -186,10 +193,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
               const SizedBox(height: 24),
-              if (_requestId != null) Text('Verified — requestId: $_requestId',
-                  style: const TextStyle(color: QuickAuthColors.accentDarker)),
-              if (_error != null) Text('Error: $_error',
-                  style: const TextStyle(color: QuickAuthColors.danger)),
+              if (_requestId != null)
+                Text('Verified — requestId: $_requestId',
+                    style:
+                        const TextStyle(color: QuickAuthColors.accentDarker)),
+              if (_error != null)
+                Text('Error: $_error',
+                    style: const TextStyle(color: QuickAuthColors.danger)),
             ],
           ),
         ),

@@ -24,7 +24,8 @@ void main() {
 
   group('TokenManager', () {
     test('seeded fresh token is returned without invoking provider', () async {
-      final seed = _jwtWithExp(_nowSec(const Duration(minutes: 9)), sub: 'seed');
+      final seed =
+          _jwtWithExp(_nowSec(const Duration(minutes: 9)), sub: 'seed');
       var calls = 0;
       final tm = TokenManager(
         provider: () async {
@@ -153,8 +154,7 @@ void main() {
         providerCalls++;
         return providerCalls == 1 ? t1 : t2;
       });
-      final tm =
-          TokenManager(provider: cfg.onTokenExpiry!, initialToken: null);
+      final tm = TokenManager(provider: cfg.onTokenExpiry!, initialToken: null);
       final headers = <String>[];
       final mock = MockClient((req) async {
         headers.add(req.headers['authorization']!);

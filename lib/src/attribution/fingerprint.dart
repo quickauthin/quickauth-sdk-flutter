@@ -15,7 +15,8 @@ import '../core/storage.dart';
 /// the same install without ever reading IMEI / IDFA / advertising id.
 class QuickAuthFingerprint {
   /// Build a fingerprinter.
-  QuickAuthFingerprint({required QuickAuthStorage storage}) : _storage = storage;
+  QuickAuthFingerprint({required QuickAuthStorage storage})
+      : _storage = storage;
 
   static const String _anchorKey = 'fingerprint_anchor';
 

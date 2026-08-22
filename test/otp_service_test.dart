@@ -6,11 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:quickauth_flutter/quickauth_flutter.dart';
-import 'package:quickauth_flutter/src/auth/auth_event.dart';
-import 'package:quickauth_flutter/src/auth/otp_service.dart';
 import 'package:quickauth_flutter/src/auth/sms_retriever.dart';
 import 'package:quickauth_flutter/src/core/api_client.dart';
-import 'package:quickauth_flutter/src/core/config.dart';
 import 'package:quickauth_flutter/src/core/storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -38,6 +35,7 @@ String _fakeJwt({required int exp, String sub = 'sess_test'}) {
     final s = base64Url.encode(utf8.encode(jsonEncode(m)));
     return s.replaceAll('=', '');
   }
+
   final header = b64(<String, dynamic>{'alg': 'HS256', 'typ': 'JWT'});
   final payload = b64(<String, dynamic>{'sub': sub, 'exp': exp});
   return '$header.$payload.sig';
@@ -45,13 +43,16 @@ String _fakeJwt({required int exp, String sub = 'sess_test'}) {
 
 QuickAuthConfig _config({AuthEventHandler? onAuthEvent}) => QuickAuthConfig(
       onTokenExpiry: () async => _fakeJwt(
-        exp: DateTime.now().add(const Duration(minutes: 10)).millisecondsSinceEpoch ~/
+        exp: DateTime.now()
+                .add(const Duration(minutes: 10))
+                .millisecondsSinceEpoch ~/
             1000,
       ),
       onAuthEvent: onAuthEvent,
     );
 
-QuickAuthApiClient _client(MockClient mock, QuickAuthConfig cfg, {String? seedToken}) {
+QuickAuthApiClient _client(MockClient mock, QuickAuthConfig cfg,
+    {String? seedToken}) {
   final tm = TokenManager(
     provider: cfg.onTokenExpiry!,
     initialToken: seedToken ??
@@ -65,7 +66,8 @@ QuickAuthApiClient _client(MockClient mock, QuickAuthConfig cfg, {String? seedTo
   return QuickAuthApiClient(config: cfg, tokenManager: tm, httpClient: mock);
 }
 
-QuickAuthOtpService _service(MockClient mock, {
+QuickAuthOtpService _service(
+  MockClient mock, {
   AuthEventHandler? onAuthEvent,
   String? seedToken,
   QuickAuthConsent? consent,
@@ -77,7 +79,8 @@ QuickAuthOtpService _service(MockClient mock, {
     smsRetriever: _FakeSmsRetriever(),
     storage: QuickAuthStorage(),
     configProvider: () => cfg,
-    consent: consent ?? QuickAuthConsent(storage: QuickAuthStorage(), initial: false),
+    consent: consent ??
+        QuickAuthConsent(storage: QuickAuthStorage(), initial: false),
   );
 }
 
@@ -107,7 +110,8 @@ void main() {
 
       final events = <AuthEvent>[];
       final service = _service(mock, onAuthEvent: events.add);
-      await service.initiate(phone: '+919876543210', channel: OtpChannel.whatsapp);
+      await service.initiate(
+          phone: '+919876543210', channel: OtpChannel.whatsapp);
       // Drain microtasks so the queued event fires.
       await Future<void>.delayed(Duration.zero);
 
@@ -158,13 +162,15 @@ void main() {
           headers: <String, String>{'content-type': 'application/json'},
         );
       });
-      final consent = QuickAuthConsent(storage: QuickAuthStorage(), initial: true);
+      final consent =
+          QuickAuthConsent(storage: QuickAuthStorage(), initial: true);
       final service = _service(mock, consent: consent);
       await service.initiate(phone: '+919876543210');
 
       final body = jsonDecode(lastRequest.body) as Map<String, dynamic>;
       expect(body['deviceInfo'], isA<Map<String, dynamic>>());
-      expect((body['deviceInfo'] as Map<String, dynamic>)['platform'], isNotNull);
+      expect(
+          (body['deviceInfo'] as Map<String, dynamic>)['platform'], isNotNull);
     });
 
     test('emits Verified directly when backend reports OneTap', () async {
@@ -216,7 +222,8 @@ void main() {
     });
 
     test('rejects non-E.164 phones', () async {
-      final service = _service(MockClient((_) async => http.Response('{}', 200)));
+      final service =
+          _service(MockClient((_) async => http.Response('{}', 200)));
       expect(
         () => service.initiate(phone: 'bad'),
         throwsA(isA<ArgumentError>()),
@@ -320,7 +327,8 @@ void main() {
     });
 
     test('submitOtp before initiate throws StateError', () async {
-      final service = _service(MockClient((_) async => http.Response('{}', 200)));
+      final service =
+          _service(MockClient((_) async => http.Response('{}', 200)));
       expect(
         () => service.submitOtp('123456'),
         throwsA(isA<StateError>()),
@@ -328,7 +336,8 @@ void main() {
     });
 
     test('submitOtp rejects malformed code', () async {
-      final service = _service(MockClient((_) async => http.Response('{}', 200)));
+      final service =
+          _service(MockClient((_) async => http.Response('{}', 200)));
       expect(
         () => service.submitOtp('abc'),
         throwsA(isA<ArgumentError>()),
