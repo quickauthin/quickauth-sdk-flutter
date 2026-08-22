@@ -18,6 +18,17 @@ import android.util.Log
  * running at all — a runtime receiver only exists once the app already does, which is the case
  * that needs it least.
  *
+ * <p>The receiver is exported with no permission guard, matching Meta's documented
+ * declaration. Guarding it would be worse than useless: Android silently drops a broadcast
+ * aimed at a receiver whose permission the sender does not hold, so a guessed permission name
+ * produces a receiver that never fires, with nothing thrown and nothing logged.
+ *
+ * <p>Safety comes from WhatsApp's side. It only broadcasts to an app whose package name and
+ * 11-character signing hash match the approved template, which an attacker cannot satisfy
+ * without the signing key. What is left to us is not trusting the payload blindly: a code that
+ * is not plausibly a code is dropped, and WhatsApp's request_id is passed up so an app running
+ * Meta's handshake can tie the code to a request it actually started.
+ *
  * <p>That in turn means the code can arrive with no Dart isolate to hand it to. It is held
  * here and flushed the moment something listens, so a cold start does not lose it.
  */
@@ -26,16 +37,27 @@ class WhatsAppOtpReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
         if (intent?.action != ACTION_OTP_RETRIEVED) return
 
-        // WhatsApp's own permission on the receiver keeps other apps out, but a code that is
-        // absent or empty is worth ignoring quietly rather than surfacing as a blank OTP the
-        // user cannot explain.
+        // A code that is absent or empty is worth ignoring quietly rather than surfacing as a
+        // blank OTP the user cannot explain.
         val code = intent.getStringExtra(EXTRA_CODE)?.trim()
         if (code.isNullOrEmpty()) {
             Log.w(TAG, "WhatsApp OTP broadcast carried no code")
             return
         }
 
-        Log.d(TAG, "WhatsApp OTP received (${code.length} chars)")
+        // Shape check, not a security boundary — WhatsApp's package + signing-hash match is
+        // that. This only stops an obviously wrong payload becoming a code the app tries to
+        // verify, which would surface to the user as a failure they cannot explain.
+        if (!PLAUSIBLE_CODE.matches(code)) {
+            Log.w(TAG, "WhatsApp OTP broadcast carried an implausible code; ignoring")
+            return
+        }
+
+        // Meta's handshake gives the app a request_id to tie a code back to a request it
+        // started. Passed up rather than checked here: the receiver has no view of what the
+        // Dart side asked for, and dropping it would remove the only means of checking.
+        val requestId = intent.getStringExtra(EXTRA_REQUEST_ID)
+        Log.d(TAG, "WhatsApp OTP received (${code.length} chars, requestId=${requestId != null})")
         deliver(code)
     }
 
@@ -52,6 +74,16 @@ class WhatsAppOtpReceiver : BroadcastReceiver() {
          */
         const val ACTION_OTP_RETRIEVED = "com.whatsapp.otp.OTP_RETRIEVED"
         const val EXTRA_CODE = "code"
+
+        /** Meta's handshake id, present when the app initiated one. */
+        const val EXTRA_REQUEST_ID = "request_id"
+
+        /**
+         * A code is digits, four to ten of them. Deliberately loose — Meta lets a merchant
+         * choose the length, and rejecting a valid code because it is longer than expected
+         * would break auto-read for exactly the merchants who configured it.
+         */
+        private val PLAUSIBLE_CODE = Regex("^[0-9]{4,10}$")
 
         /**
          * The code, waiting for a listener.

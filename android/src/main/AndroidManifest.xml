@@ -19,21 +19,31 @@
 
     <application>
         <!--
-          WhatsApp delivers a zero-tap or one-tap code by broadcasting to the app, not by SMS,
-          so SmsRetriever never sees it. Declared statically rather than registered at runtime
-          because zero-tap's whole promise is that the user does nothing: the code can arrive
-          while the app is backgrounded or not running, and a runtime receiver would only exist
-          when the app already does.
+          WhatsApp delivers a zero-tap or one-tap code by broadcasting to the app, not by
+          SMS, so SmsRetriever never sees it. Declared statically rather than registered at
+          runtime because zero-tap's whole promise is that the user does nothing: the code
+          can arrive while the app is backgrounded or not running, and a runtime receiver
+          would only exist when the app already does.
 
-          android:permission restricts who may deliver this broadcast to holders of WhatsApp's
-          own permission. Without it the receiver is exported to every app on the device, and
-          any of them could hand our SDK an OTP of their choosing — which the app would then
-          treat as a code the user legitimately received.
+          No android:permission, deliberately. It is tempting to restrict the sender, and an
+          earlier version of this file guessed at a WhatsApp-owned permission name — which
+          would have been the worst possible mistake here, because Android silently refuses
+          to deliver a broadcast to a receiver guarded by a permission the sender does not
+          hold. The receiver would never fire, nothing would throw, and the symptom would be
+          "zero-tap does not work" with no error to chase. Meta's documented receiver
+          declares exported="true" and no permission.
+
+          What actually keeps this safe is WhatsApp's own check, not ours: it only broadcasts
+          to an app whose package name AND 11-character signing hash match the ones on the
+          approved template. An attacker cannot satisfy that without your signing key. The
+          receiver additionally rejects anything that is not a plausible code, and passes
+          WhatsApp's request_id up to Dart so an app running Meta's handshake can tie the
+          code to a request it started.
         -->
         <receiver
             android:name="io.quickauth.sdk_flutter.WhatsAppOtpReceiver"
-            android:exported="true"
-            android:permission="com.whatsapp.otp.permission.SEND_OTP">
+            android:enabled="true"
+            android:exported="true">
             <intent-filter>
                 <action android:name="com.whatsapp.otp.OTP_RETRIEVED" />
             </intent-filter>
