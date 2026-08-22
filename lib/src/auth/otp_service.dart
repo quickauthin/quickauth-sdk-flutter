@@ -7,6 +7,7 @@ import '../core/consent.dart';
 import '../core/storage.dart';
 import 'auth_event.dart';
 import 'sms_retriever.dart';
+import 'whatsapp_otp_retriever.dart';
 
 const String _deviceTokenKey = 'device_token';
 final RegExp _e164 = RegExp(r'^\+[1-9]\d{6,14}$');
@@ -87,17 +88,20 @@ class QuickAuthOtpService {
   QuickAuthOtpService({
     required QuickAuthApiClient apiClient,
     required SmsRetriever smsRetriever,
+    WhatsAppOtpRetriever? whatsAppRetriever,
     required QuickAuthStorage storage,
     required QuickAuthConfig Function() configProvider,
     required QuickAuthConsent consent,
   })  : _api = apiClient,
         _sms = smsRetriever,
+        _wa = whatsAppRetriever ?? WhatsAppOtpRetriever(),
         _storage = storage,
         _config = configProvider,
         _consent = consent;
 
   final QuickAuthApiClient _api;
   final SmsRetriever _sms;
+  final WhatsAppOtpRetriever _wa;
   final QuickAuthStorage _storage;
   final QuickAuthConfig Function() _config;
   final QuickAuthConsent _consent;
@@ -145,6 +149,7 @@ class QuickAuthOtpService {
   Future<void> initiate({
     required String phone,
     OtpChannel channel = OtpChannel.auto,
+    bool autoSubmit = false,
   }) async {
     if (!_e164.hasMatch(phone)) {
       throw ArgumentError.value(
@@ -159,6 +164,13 @@ class QuickAuthOtpService {
 
     // Fire-and-forget SMS Retriever — failure must not block OTP delivery.
     unawaited(_sms.start());
+    // Drop any WhatsApp code held from an earlier attempt. The native receiver keeps one so a
+    // zero-tap code arriving before the app was running is not lost, but delivering that
+    // against a request the user has since restarted fails verification for reasons they
+    // cannot see.
+    unawaited(_wa.clearPending());
+    _autoSubmit = autoSubmit;
+    _autoSubmitted = false;
 
     final deviceToken = await _loadDeviceToken();
     final body = <String, dynamic>{
@@ -278,15 +290,72 @@ class QuickAuthOtpService {
   /// Useful when integrating with an external SMS observer.
   void publishAutoReadCode(String code) {
     _emit(OtpAutoReadEvent(code));
+    _maybeAutoSubmit(code);
   }
 
-  /// Stream of OTPs auto-read from inbound SMS (Android-only). Codes
-  /// collected here are also surfaced as [OtpAutoReadEvent] events.
+  /// Whether the current attempt should verify an auto-read code by itself.
+  bool _autoSubmit = false;
+
+  /// One auto-submit per attempt. Both sources can deliver — a merchant sending on `auto`
+  /// may get the SMS and the WhatsApp copy — and submitting the second would verify a code
+  /// the server has already consumed, surfacing as a spurious failure after a success.
+  bool _autoSubmitted = false;
+
+  void _maybeAutoSubmit(String code) {
+    if (!_autoSubmit || _autoSubmitted) return;
+    _autoSubmitted = true;
+    unawaited(submitOtp(code));
+  }
+
+  /// Codes read automatically, from whichever channel delivered them (Android only).
+  ///
+  /// Merges the two, because they are two delivery mechanisms for one thing and a caller
+  /// should not have to know which arrived. An OTP sent over SMS is parsed out of the message
+  /// body by SmsRetriever; a WhatsApp one-tap or zero-tap code is broadcast to the app by
+  /// WhatsApp and arrives already extracted. Listening to only one — which is all that was
+  /// possible before — means a merchant on `auto` gets auto-read for some users and not
+  /// others, with nothing to explain the difference.
+  ///
+  /// Codes also surface as [OtpAutoReadEvent] on the event stream, so callers already
+  /// listening there get WhatsApp codes without changing anything.
   Stream<String> observeOTP() {
-    return _sms.observe().map((code) {
+    return _merge(_sms.observe(), _wa.observe()).map((code) {
       _emit(OtpAutoReadEvent(code));
+      _maybeAutoSubmit(code);
       return code;
     });
+  }
+
+  /// Merge two code sources into one.
+  ///
+  /// Hand-rolled rather than pulling in package:async for a two-stream merge. Both are
+  /// broadcast streams and either may be empty (neither fires off Android), so the merged
+  /// stream closes only once both have, and cancelling it cancels both — a listener that
+  /// walks away must not leave a native receiver attached.
+  static Stream<String> _merge(Stream<String> a, Stream<String> b) {
+    late StreamController<String> controller;
+    final subs = <StreamSubscription<String>>[];
+    var open = 2;
+
+    void onDone() {
+      if (--open == 0) controller.close();
+    }
+
+    controller = StreamController<String>.broadcast(
+      onListen: () {
+        for (final source in [a, b]) {
+          subs.add(source.listen(controller.add,
+              onError: controller.addError, onDone: onDone));
+        }
+      },
+      onCancel: () async {
+        for (final sub in subs) {
+          await sub.cancel();
+        }
+        subs.clear();
+      },
+    );
+    return controller.stream;
   }
 
   /// Get the Android app-signing hash that must terminate every OTP SMS.

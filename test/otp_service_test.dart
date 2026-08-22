@@ -16,6 +16,7 @@ class _FakeSmsRetriever extends SmsRetriever {
       : super(channel: const MethodChannel('io.quickauth/test_noop'));
 
   int starts = 0;
+  final codes = StreamController<String>.broadcast();
 
   @override
   Future<bool> start() async {
@@ -24,7 +25,7 @@ class _FakeSmsRetriever extends SmsRetriever {
   }
 
   @override
-  Stream<String> observe() => const Stream<String>.empty();
+  Stream<String> observe() => codes.stream;
 
   @override
   Future<String?> getAppHash() async => null;
@@ -66,17 +67,47 @@ QuickAuthApiClient _client(MockClient mock, QuickAuthConfig cfg,
   return QuickAuthApiClient(config: cfg, tokenManager: tm, httpClient: mock);
 }
 
+/// Lets a test deliver a WhatsApp zero-tap / one-tap code without a device.
+class _FakeWhatsAppRetriever extends WhatsAppOtpRetriever {
+  _FakeWhatsAppRetriever()
+      : super(channel: const MethodChannel('io.quickauth/test_noop'));
+
+  final codes = StreamController<String>.broadcast();
+  int cleared = 0;
+
+  @override
+  Stream<String> observe() => codes.stream;
+
+  @override
+  Future<void> clearPending() async => cleared++;
+}
+
+/// A server that accepts an initiate and then a verify — enough for the auto-read tests,
+/// which care about which stream a code came from rather than about the wire.
+MockClient _okInitiate() => MockClient((req) async => http.Response(
+      jsonEncode(<String, dynamic>{
+        'state': req.url.path.endsWith('/verify') ? 'VERIFIED' : 'OTP_SENT',
+        'sessionId': 'sess_abc',
+        'expiresIn': 300,
+      }),
+      200,
+      headers: <String, String>{'content-type': 'application/json'},
+    ));
+
 QuickAuthOtpService _service(
   MockClient mock, {
   AuthEventHandler? onAuthEvent,
   String? seedToken,
   QuickAuthConsent? consent,
+  _FakeSmsRetriever? sms,
+  _FakeWhatsAppRetriever? whatsapp,
 }) {
   late QuickAuthConfig cfg;
   cfg = _config(onAuthEvent: onAuthEvent);
   return QuickAuthOtpService(
     apiClient: _client(mock, cfg, seedToken: seedToken),
-    smsRetriever: _FakeSmsRetriever(),
+    smsRetriever: sms ?? _FakeSmsRetriever(),
+    whatsAppRetriever: whatsapp ?? _FakeWhatsAppRetriever(),
     storage: QuickAuthStorage(),
     configProvider: () => cfg,
     consent: consent ??
@@ -400,6 +431,55 @@ void main() {
       expect(OtpChannel.auto.wire, 'auto');
       expect(OtpChannel.sms.wire, 'sms');
       expect(OtpChannel.whatsapp.wire, 'whatsapp');
+    });
+  });
+
+  group('auto-read across both channels', () {
+    // SMS and WhatsApp are two delivery mechanisms for one thing. Before this, only SMS was
+    // observed, so a merchant sending on `auto` got auto-read for some users and not others
+    // with nothing to explain the difference.
+
+    test('delivers a code that arrived over WhatsApp', () async {
+      final wa = _FakeWhatsAppRetriever();
+      final svc = _service(_okInitiate(), whatsapp: wa);
+      final seen = svc.observeOTP().take(1).toList();
+      wa.codes.add('445566');
+      expect(await seen, ['445566']);
+    });
+
+    test('delivers a code that arrived over SMS', () async {
+      final sms = _FakeSmsRetriever();
+      final svc = _service(_okInitiate(), sms: sms);
+      final seen = svc.observeOTP().take(1).toList();
+      sms.codes.add('112233');
+      expect(await seen, ['112233']);
+    });
+
+    test('surfaces both on the event stream, so existing listeners need no change', () async {
+      final events = <AuthEvent>[];
+      final sms = _FakeSmsRetriever();
+      final wa = _FakeWhatsAppRetriever();
+      final svc = _service(_okInitiate(),
+          onAuthEvent: events.add, sms: sms, whatsapp: wa);
+      final seen = svc.observeOTP().take(2).toList();
+      sms.codes.add('111111');
+      wa.codes.add('222222');
+      await seen;
+      // _emit defers through scheduleMicrotask so events land after an awaited future
+      // resumes; without a turn of the loop the last one has not fired yet.
+      await Future<void>.delayed(Duration.zero);
+      expect(events.whereType<OtpAutoReadEvent>().map((e) => e.code),
+          containsAll(<String>['111111', '222222']));
+    });
+
+    test('initiate drops a WhatsApp code held from an earlier attempt', () async {
+      // The native receiver holds one so a zero-tap code arriving before the app was running
+      // is not lost. Delivering that against a restarted request fails verification for
+      // reasons the user cannot see.
+      final wa = _FakeWhatsAppRetriever();
+      final svc = _service(_okInitiate(), whatsapp: wa);
+      await svc.initiate(phone: '+919876543210');
+      expect(wa.cleared, 1);
     });
   });
 }
