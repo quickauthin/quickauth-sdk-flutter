@@ -68,21 +68,41 @@ jobs:
           channel: stable
           cache: true
 
-      # ── OIDC auth (Option A) ─────────────────────────────────────────────
-      # Modern approach — requires pub.dev publisher to authorise the repo
-      # under My publishers → quickauth.in → Automated publishing.
-      - name: Authenticate with pub.dev (OIDC)
-        # `dart-lang/setup-dart` populates an OIDC token that pub.dev trusts
-        # when the publisher has authorised this repo + tag pattern.
-        uses: dart-lang/setup-dart@v1
+      # ── Auth: credentials secret ─────────────────────────────────────────
+      # PUB_CREDENTIALS_JSON is the contents of the pub-credentials.json written by
+      # `flutter pub login` on a machine signed in as a member of the quickauth.in
+      # publisher. It carries a refresh token, so it keeps working after the hour-long
+      # access token expires.
+      #
+      # Passed through env rather than interpolated into the shell. `echo '${{ ... }}'`
+      # puts the secret on the command line, where a `set -x`, a shell trace or a
+      # non-zero exit can surface it in the log — and the JSON contains characters that
+      # break single-quoting anyway. GitHub masks known secrets in output, but not
+      # reliably once they have been through shell mangling.
+      - name: Restore pub.dev credentials
+        env:
+          PUB_CREDENTIALS_JSON: ${{ secrets.PUB_CREDENTIALS_JSON }}
+        run: |
+          if [ -z "$PUB_CREDENTIALS_JSON" ]; then
+            echo "::error::PUB_CREDENTIALS_JSON is not set. Add it under Settings → Secrets → Actions."
+            exit 1
+          fi
+          # Linux runner: Dart reads $XDG_CONFIG_HOME/dart, defaulting to ~/.config/dart.
+          # (On macOS it would be ~/Library/Application Support/dart — this job is
+          # ubuntu-latest, so the Linux path is the correct one.)
+          mkdir -p ~/.config/dart
+          printf '%s' "$PUB_CREDENTIALS_JSON" > ~/.config/dart/pub-credentials.json
+          chmod 600 ~/.config/dart/pub-credentials.json
+          python3 -c "import json,sys; json.load(open(sys.argv[1]))" ~/.config/dart/pub-credentials.json \
+            || { echo "::error::PUB_CREDENTIALS_JSON is not valid JSON — re-copy the file verbatim."; exit 1; }
+          echo "Credentials restored."
 
-      # ── Credentials secret auth (Option B) ───────────────────────────────
-      # Uncomment if you're using PUB_CREDENTIALS_JSON instead of OIDC.
-      # - name: Restore pub.dev credentials from secret
-      #   run: |
-      #     mkdir -p ~/.config/dart
-      #     echo '${{ secrets.PUB_CREDENTIALS_JSON }}' > ~/.config/dart/pub-credentials.json
-      #     chmod 600 ~/.config/dart/pub-credentials.json
+      # ── Alternative: OIDC ────────────────────────────────────────────────
+      # No secret to manage, but requires the publisher to authorise this repo under
+      # My publishers → quickauth.in → Automated publishing, with tag pattern
+      # v{{version}}. Swap the step above for this one if you set that up.
+      # - name: Authenticate with pub.dev (OIDC)
+      #   uses: dart-lang/setup-dart@v1
 
       - name: Bump pubspec.yaml to ${{ inputs.version }}
         run: |
@@ -115,8 +135,8 @@ jobs:
 
       - name: Configure git author
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "QuickAuth-Tech"
+          git config user.email "contact@quickauth.in"
 
       - name: Commit version bump + tag + push
         run: |
