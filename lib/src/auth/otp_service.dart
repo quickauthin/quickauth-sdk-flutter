@@ -171,6 +171,7 @@ class QuickAuthOtpService {
     unawaited(_wa.clearPending());
     _autoSubmit = autoSubmit;
     _autoSubmitted = false;
+    _listenForAutoRead();
 
     final deviceToken = await _loadDeviceToken();
     final body = <String, dynamic>{
@@ -275,10 +276,18 @@ class QuickAuthOtpService {
     _emit(OtpFailedEvent(message));
   }
 
+  /// Stop listening for auto-read codes. Called on reset, and safe to call twice.
+  Future<void> _stopAutoRead() async {
+    await _autoReadSub?.cancel();
+    _autoReadSub = null;
+    _autoSubmit = false;
+  }
+
   /// Reset the state machine. Pass [forgetDevice] = `true` on user-initiated
   /// sign-out to also drop the persistent device token, making the next
   /// [initiate] act like a brand-new install (no OneTap).
   Future<void> reset({bool forgetDevice = false}) async {
+    await _stopAutoRead();
     _state = _Idle();
     _attemptCounter++; // invalidate any in-flight attempt
     if (forgetDevice) {
@@ -296,10 +305,40 @@ class QuickAuthOtpService {
   /// Whether the current attempt should verify an auto-read code by itself.
   bool _autoSubmit = false;
 
+  /// The service's own subscription to the auto-read sources.
+  ///
+  /// Without this, auto-read only worked for a caller who happened to listen to
+  /// [observeOTP]. The native side attaches to the WhatsApp receiver on the event channel's
+  /// onListen, so with nobody subscribed the code was received, held, and never delivered —
+  /// autoSubmit did nothing at all, which is precisely the case where the caller was told
+  /// they need not listen.
+  StreamSubscription<String>? _autoReadSub;
+
   /// One auto-submit per attempt. Both sources can deliver — a merchant sending on `auto`
   /// may get the SMS and the WhatsApp copy — and submitting the second would verify a code
   /// the server has already consumed, surfacing as a spurious failure after a success.
   bool _autoSubmitted = false;
+
+  /// Subscribe on the caller's behalf, so a code is delivered whether or not they listen.
+  ///
+  /// Idempotent across attempts: a resend must not stack subscriptions, and the old one is
+  /// dropped first so a code from a previous attempt cannot arrive on it.
+  void _listenForAutoRead() {
+    unawaited(_autoReadSub?.cancel());
+    _autoReadSub = null;
+    // No platform guard. Both sources return an empty stream where they are unsupported, so
+    // subscribing off Android costs one immediately-closing stream — and a guard reading the
+    // platform here would be a second place for "is auto-read available" to be decided, which
+    // is how the two ended up disagreeing before.
+    _autoReadSub = _merge(_sms.observe(), _wa.observe()).listen(
+      (code) {
+        _emit(OtpAutoReadEvent(code));
+        _maybeAutoSubmit(code);
+      },
+      // A platform-side failure must not take down the OTP flow; the user can still type it.
+      onError: (Object _) {},
+    );
+  }
 
   void _maybeAutoSubmit(String code) {
     if (!_autoSubmit || _autoSubmitted) return;
@@ -319,11 +358,10 @@ class QuickAuthOtpService {
   /// Codes also surface as [OtpAutoReadEvent] on the event stream, so callers already
   /// listening there get WhatsApp codes without changing anything.
   Stream<String> observeOTP() {
-    return _merge(_sms.observe(), _wa.observe()).map((code) {
-      _emit(OtpAutoReadEvent(code));
-      _maybeAutoSubmit(code);
-      return code;
-    });
+    // No _emit here. initiate() already subscribes on the caller's behalf and emits from
+    // there; doing it again would fire OtpAutoReadEvent twice for one code, and a merchant
+    // driving their UI from that event would see the field filled, cleared and filled again.
+    return _merge(_sms.observe(), _wa.observe());
   }
 
   /// Merge two code sources into one.

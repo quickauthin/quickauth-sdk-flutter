@@ -461,15 +461,61 @@ void main() {
       final wa = _FakeWhatsAppRetriever();
       final svc = _service(_okInitiate(),
           onAuthEvent: events.add, sms: sms, whatsapp: wa);
-      final seen = svc.observeOTP().take(2).toList();
+      // initiate is what subscribes; the events come from there, not from observeOTP.
+      await svc.initiate(phone: '+919876543210');
       sms.codes.add('111111');
       wa.codes.add('222222');
-      await seen;
       // _emit defers through scheduleMicrotask so events land after an awaited future
       // resumes; without a turn of the loop the last one has not fired yet.
       await Future<void>.delayed(Duration.zero);
       expect(events.whereType<OtpAutoReadEvent>().map((e) => e.code),
           containsAll(<String>['111111', '222222']));
+    });
+
+    test('auto-reads without the caller subscribing to anything', () async {
+      // The bug this pins. The native side attaches to the WhatsApp receiver on the event
+      // channel's onListen, so when nothing was subscribed the code was received, held and
+      // never delivered — autoSubmit did nothing at all, in exactly the case where the
+      // caller was told they need not listen.
+      final events = <AuthEvent>[];
+      final wa = _FakeWhatsAppRetriever();
+      final svc = _service(_okInitiate(), onAuthEvent: events.add, whatsapp: wa);
+
+      await svc.initiate(phone: '+919876543210');
+      wa.codes.add('778899');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(events.whereType<OtpAutoReadEvent>().map((e) => e.code),
+          contains('778899'));
+    });
+
+    test('autoSubmit verifies the code on its own', () async {
+      final events = <AuthEvent>[];
+      final wa = _FakeWhatsAppRetriever();
+      final svc = _service(_okInitiate(), onAuthEvent: events.add, whatsapp: wa);
+
+      await svc.initiate(phone: '+919876543210', autoSubmit: true);
+      wa.codes.add('445566');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(events.whereType<VerifiedEvent>(), isNotEmpty);
+    });
+
+    test('autoSubmit verifies once even when both channels deliver', () async {
+      // On `auto` a merchant can get the SMS and the WhatsApp copy. Submitting the second
+      // verifies a code the server has consumed, which surfaces as a failure after a success.
+      final events = <AuthEvent>[];
+      final sms = _FakeSmsRetriever();
+      final wa = _FakeWhatsAppRetriever();
+      final svc = _service(_okInitiate(),
+          onAuthEvent: events.add, sms: sms, whatsapp: wa);
+
+      await svc.initiate(phone: '+919876543210', autoSubmit: true);
+      sms.codes.add('112233');
+      wa.codes.add('112233');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(events.whereType<VerifiedEvent>(), hasLength(1));
     });
 
     test('initiate drops a WhatsApp code held from an earlier attempt', () async {
