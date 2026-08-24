@@ -74,12 +74,19 @@ class _FakeWhatsAppRetriever extends WhatsAppOtpRetriever {
 
   final codes = StreamController<String>.broadcast();
   int cleared = 0;
+  int handshakes = 0;
 
   @override
   Stream<String> observe() => codes.stream;
 
   @override
   Future<void> clearPending() async => cleared++;
+
+  @override
+  Future<String?> sendHandshake() async {
+    handshakes++;
+    return 'req-1';
+  }
 }
 
 /// A server that accepts an initiate and then a verify — enough for the auto-read tests,
@@ -516,6 +523,31 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       expect(events.whereType<VerifiedEvent>(), hasLength(1));
+    });
+
+    test('initiate handshakes with WhatsApp before requesting the code', () async {
+      // Zero-tap does not work without this, and nothing says so: WhatsApp shows the message
+      // and never broadcasts the code, with template, package, hash and receiver all correct
+      // and no error anywhere. It must go BEFORE the request — WhatsApp checks for a live
+      // handshake when the template arrives, and one sent afterwards is too late.
+      final wa = _FakeWhatsAppRetriever();
+      final svc = _service(_okInitiate(), whatsapp: wa);
+
+      await svc.initiate(phone: '+919876543210');
+
+      expect(wa.handshakes, 1);
+    });
+
+    test('a handshake is sent per attempt, because it expires', () async {
+      // Meta expires it after ten minutes, so one at startup would leave every later request
+      // unhandshaked and silently unable to auto-read.
+      final wa = _FakeWhatsAppRetriever();
+      final svc = _service(_okInitiate(), whatsapp: wa);
+
+      await svc.initiate(phone: '+919876543210');
+      await svc.initiate(phone: '+919876543210');
+
+      expect(wa.handshakes, 2);
     });
 
     test('initiate drops a WhatsApp code held from an earlier attempt', () async {

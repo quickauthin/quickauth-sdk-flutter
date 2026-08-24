@@ -53,6 +53,26 @@ class WhatsAppOtpRetriever {
   @visibleForTesting
   static String normalise(Object? event) => event is String ? event.trim() : '';
 
+  /// Tell WhatsApp a code is about to be requested, and that this app may receive it.
+  ///
+  /// Zero-tap does not work without this. Meta requires the handshake to be broadcast BEFORE
+  /// the authentication template is sent — without it WhatsApp shows the message and simply
+  /// never broadcasts the code, with every other check passing and nothing to explain it.
+  ///
+  /// The handshake expires after ten minutes, so it is sent per request rather than once at
+  /// startup. Returns the request id WhatsApp will echo back with the code, or null where
+  /// this is not supported or the broadcast failed.
+  ///
+  /// Never throws: a missing handshake costs auto-read, not the login.
+  Future<String?> sendHandshake() async {
+    if (!isSupported) return null;
+    try {
+      return await _channel.invokeMethod<String>('sendWhatsAppOtpHandshake');
+    } on PlatformException {
+      return null;
+    }
+  }
+
   /// Discard any code held natively from an earlier attempt.
   ///
   /// Call when requesting a fresh OTP. Without it, a code that arrived after the user gave up

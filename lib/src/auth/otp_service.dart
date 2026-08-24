@@ -169,6 +169,10 @@ class QuickAuthOtpService {
     // against a request the user has since restarted fails verification for reasons they
     // cannot see.
     unawaited(_wa.clearPending());
+    // Before the OTP is requested, not after: WhatsApp checks for a live handshake when it
+    // receives the template, and one sent afterwards is too late for the message already in
+    // flight. Awaited for the same reason — firing it unawaited would race the send.
+    await _wa.sendHandshake();
     _autoSubmit = autoSubmit;
     _autoSubmitted = false;
     _listenForAutoRead();

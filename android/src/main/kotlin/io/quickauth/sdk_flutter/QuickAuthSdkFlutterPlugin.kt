@@ -116,6 +116,7 @@ class QuickAuthSdkFlutterPlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
             "getAppHash" -> result.success(getAppHashes().firstOrNull())
             // Called when a fresh OTP is requested, so a code held from an earlier attempt
             // cannot be delivered against the new one.
+            "sendWhatsAppOtpHandshake" -> result.success(sendHandshakeToWhatsApp())
             "clearWhatsAppOtp" -> {
                 WhatsAppOtpReceiver.clearPending()
                 result.success(true)
@@ -129,6 +130,58 @@ class QuickAuthSdkFlutterPlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
                 }
             }
             else -> result.notImplemented()
+        }
+    }
+
+    /**
+     * Tell WhatsApp we are about to request a code, and that this app may receive it.
+     *
+     * <p>Zero-tap does not work without this, and nothing says so. Meta requires the app to
+     * broadcast a handshake BEFORE the template is sent: "When a user in your app requests a
+     * password or code to be delivered to their WhatsApp number, first initiate the handshake,
+     * then call our API to send the authentication template message."
+     *
+     * <p>Without it WhatsApp receives the message and shows it, and simply never broadcasts
+     * the code. Every other check can pass — template approved, package matching, signing hash
+     * matching, receiver registered and firing — and the OTP still does not auto-fill, with no
+     * error anywhere to explain it.
+     *
+     * <p>The PendingIntent in {@code _ci_} is how WhatsApp identifies the caller. It carries no
+     * action and is never sent; WhatsApp reads the creator's identity off it, which is why it
+     * must be immutable — a mutable one would let another app fill it in.
+     *
+     * <p>Broadcast to both WhatsApp and WhatsApp Business, because the user's code arrives on
+     * whichever they have. Sending to a package that is not installed is a no-op rather than an
+     * error, so there is nothing to check first.
+     *
+     * <p>The handshake expires after ten minutes, so it is sent per OTP request rather than
+     * once at startup.
+     *
+     * @return the request id, which the receiver echoes back so a caller can tie a delivered
+     *         code to the request that asked for it
+     */
+    private fun sendHandshakeToWhatsApp(): String? {
+        val ctx = context ?: return null
+        return try {
+            val requestId = java.util.UUID.randomUUID().toString()
+            // No action and FLAG_IMMUTABLE: this is an identity token, not something to fire.
+            val identity = android.app.PendingIntent.getBroadcast(
+                ctx, 0, Intent(),
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            for (pkg in WHATSAPP_PACKAGES) {
+                val intent = Intent(ACTION_OTP_REQUESTED).setPackage(pkg)
+                intent.putExtra("_ci_", identity)
+                intent.putExtra("request_id", requestId)
+                ctx.sendBroadcast(intent)
+            }
+            Log.d(TAG, "WhatsApp OTP handshake sent (requestId=$requestId)")
+            requestId
+        } catch (t: Throwable) {
+            // Never fail the OTP request over this. A missing handshake costs auto-read, not
+            // the login — the user can still read the code and type it.
+            Log.w(TAG, "WhatsApp OTP handshake failed: ${t.message}")
+            null
         }
     }
 
@@ -267,6 +320,12 @@ class QuickAuthSdkFlutterPlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
          * existing listener would start receiving a shape it was never written for.
          */
         private const val WA_EVENT_CHANNEL = "io.quickauth/whatsapp_otp/events"
+
+        /** Meta's handshake action, broadcast to WhatsApp before the template is sent. */
+        private const val ACTION_OTP_REQUESTED = "com.whatsapp.otp.OTP_REQUESTED"
+
+        /** Consumer WhatsApp and WhatsApp Business — the code arrives on whichever is installed. */
+        private val WHATSAPP_PACKAGES = listOf("com.whatsapp", "com.whatsapp.w4b")
         private const val HASH_LENGTH = 11
         private const val HASH_BYTES = 9
     }
