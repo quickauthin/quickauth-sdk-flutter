@@ -175,12 +175,12 @@ class QuickAuthSdkFlutterPlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
                 intent.putExtra("request_id", requestId)
                 ctx.sendBroadcast(intent)
             }
-            Log.d(TAG, "WhatsApp OTP handshake sent (requestId=$requestId)")
+            Log.d(WA_TAG, "WhatsApp OTP handshake sent (requestId=$requestId)")
             requestId
         } catch (t: Throwable) {
             // Never fail the OTP request over this. A missing handshake costs auto-read, not
             // the login — the user can still read the code and type it.
-            Log.w(TAG, "WhatsApp OTP handshake failed: ${t.message}")
+            Log.w(WA_TAG, "WhatsApp OTP handshake failed: ${t.message}")
             null
         }
     }
@@ -308,6 +308,17 @@ class QuickAuthSdkFlutterPlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
 
     companion object {
         private const val TAG = "QuickAuthSdk"
+
+        /**
+         * The WhatsApp auto-read tag, shared with WhatsAppOtpReceiver.
+         *
+         * <p>The handshake logged under the plugin's own tag while the receiver logged under
+         * its own, so filtering on either showed half the exchange. Someone watching
+         * QuickAuthWaOtp — which is the tag worth watching, since it is the one the receiver
+         * uses — saw nothing at all when the handshake fired and read that as the handshake
+         * never happening. Both halves of one feature, one tag.
+         */
+        private const val WA_TAG = "QuickAuthWaOtp"
         private const val METHOD_CHANNEL = "io.quickauth/sms_retriever"
         private const val EVENT_CHANNEL = "io.quickauth/sms_retriever/events"
 
