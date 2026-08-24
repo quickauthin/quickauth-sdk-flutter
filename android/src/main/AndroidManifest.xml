@@ -1,5 +1,17 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="io.quickauth.sdk_flutter">
+<!--
+  No package attribute. It duplicated the namespace already declared in build.gradle, and
+  Android Gradle Plugin 8 rejects it outright:
+
+      Setting the namespace via the package attribute in the source AndroidManifest.xml
+      is no longer supported
+
+  A merchant on AGP 8 — which is most of them now — would have had the build fail here. If
+  they then ran `adb install -r` out of habit, it reinstalls the PREVIOUS apk, the one built
+  before the SDK was swapped in, and everything looks like it worked: install succeeds, the
+  app runs, and the receiver is simply not there. That is indistinguishable from "auto-read
+  does not work".
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
       No SMS permission, deliberately.
