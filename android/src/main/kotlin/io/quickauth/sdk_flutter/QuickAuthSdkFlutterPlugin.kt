@@ -169,13 +169,33 @@ class QuickAuthSdkFlutterPlugin : FlutterPlugin, MethodCallHandler, ActivityAwar
                 ctx, 0, Intent(),
                 android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
             )
+            // Which WhatsApp packages this app can actually see. On API 30+ an invisible
+            // package swallows the broadcast silently, so reporting it is the difference
+            // between diagnosing that in one log line and chasing the template for a day.
+            val visible = WHATSAPP_PACKAGES.filter { pkg ->
+                try {
+                    ctx.packageManager.getPackageInfo(pkg, 0)
+                    true
+                } catch (e: PackageManager.NameNotFoundException) {
+                    false
+                }
+            }
+
             for (pkg in WHATSAPP_PACKAGES) {
                 val intent = Intent(ACTION_OTP_REQUESTED).setPackage(pkg)
                 intent.putExtra("_ci_", identity)
                 intent.putExtra("request_id", requestId)
                 ctx.sendBroadcast(intent)
             }
-            Log.d(WA_TAG, "WhatsApp OTP handshake sent (requestId=$requestId)")
+
+            if (visible.isEmpty()) {
+                // Either WhatsApp is not installed, or <queries> is missing from the merged
+                // manifest. Both mean the handshake reached nobody and zero-tap cannot work.
+                Log.w(WA_TAG, "WhatsApp OTP handshake sent but NO WhatsApp package is visible "
+                        + "— not installed, or <queries> missing from the merged manifest")
+            } else {
+                Log.d(WA_TAG, "WhatsApp OTP handshake sent to $visible (requestId=$requestId)")
+            }
             requestId
         } catch (t: Throwable) {
             // Never fail the OTP request over this. A missing handshake costs auto-read, not

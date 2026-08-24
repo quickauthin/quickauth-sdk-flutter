@@ -29,6 +29,23 @@
       INTERNET is not declared either — Flutter's own manifest already provides it.
     -->
 
+    <!--
+      Android 11 (API 30) filters which other apps a package can see, and that filtering
+      applies to an explicit broadcast just as it does to a query: setPackage("com.whatsapp")
+      on a device where WhatsApp is invisible to us delivers nothing.
+
+      The handshake below is exactly that kind of broadcast, so without this the app targeting
+      API 30+ — which is every app now — silently fails to hand WhatsApp the handshake, and
+      zero-tap cannot work no matter how correct the template, hash and receiver are. Nothing
+      throws; the broadcast is simply dropped.
+
+      Both packages, because the user's code arrives on whichever WhatsApp they have.
+    -->
+    <queries>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+    </queries>
+
     <application>
         <!--
           WhatsApp delivers a zero-tap or one-tap code by broadcasting to the app, not by
