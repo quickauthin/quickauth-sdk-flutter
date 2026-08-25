@@ -3,6 +3,59 @@
 All notable changes to the QuickAuth Flutter SDK are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] — 2026-08-25
+
+### Added
+
+- **WhatsApp zero-tap and one-tap auto-read (Android).** WhatsApp does not deliver these over
+  SMS — it broadcasts the code to the app named in the template's `supported_apps` — so
+  `SmsRetriever` never saw them and the code was dropped. Four things had to be right together
+  and each one missing looked identical: message arrives, code does not fill in, nothing errors.
+  The receiver is manifest-declared so it works while the app is backgrounded, the handshake
+  Meta requires is sent before each request, and `<queries>` is declared so Android 11+ actually
+  delivers that handshake.
+- **`resendOtp()`.** Resends to the number the current attempt is already for. Takes no
+  arguments deliberately: passing a differently formatted number starts a second transaction
+  with a second code and leaves the user holding two, only one of which works. Carries the
+  original channel and `autoSubmit`, and re-sends the WhatsApp handshake, which Meta expires
+  after ten minutes.
+- **`initiate(autoSubmit: true)`.** An auto-read code verifies itself, so the integration is
+  initiate-and-listen. Off by default: an app already submitting from its own `observeOTP`
+  callback would otherwise submit twice, and the second fails against a code the server has
+  consumed — an error after a success.
+
+### Changed
+
+- **`observeOTP()` now covers both channels.** SMS and WhatsApp are two delivery mechanisms for
+  one thing; listening to only one meant a merchant on `auto` got auto-read for some users and
+  not others, with nothing to explain the difference.
+- **`initiate()` subscribes for auto-read itself.** Auto-read previously only worked for a
+  caller who happened to call `observeOTP()` — the native receiver holds a code until something
+  listens, so with nobody subscribed it was received, held, and never delivered.
+- **`OtpAutoReadEvent` fires once per code.** It was emitted by both the internal subscription
+  and the caller's, so a merchant driving their UI from it saw the field fill, clear and fill
+  again.
+
+### Removed
+
+- **`RECEIVE_SMS` and `INTERNET` from the SDK manifest.** Neither was ever used: auto-read goes
+  through `SmsRetriever`, which reads exactly one message — the one ending in the app's own hash
+  — and needs no permission, and Flutter's own manifest provides `INTERNET`.
+
+  This matters beyond tidiness. A plugin's manifest merges into every app that depends on it, so
+  every merchant was shipping an SMS permission they did not use, and `RECEIVE_SMS` is in Google
+  Play's restricted set: an app declaring it must justify the use in a Play Console declaration
+  or be removed from the store. **If you added that declaration because of this SDK, you can
+  drop it.**
+
+### Upgrading
+
+Nothing is required. `initiate`, `submitOtp`, `observeOTP` and `reset` are unchanged.
+
+For WhatsApp auto-read, the template must carry your app's package name and its 11-character
+app hash in `supported_apps` — and the hash of the build you are testing, which for a debug
+build is not your release hash.
+
 ## [1.1.2] — 2026-08-22
 
 ### Fixed

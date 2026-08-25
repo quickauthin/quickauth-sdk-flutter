@@ -1,5 +1,81 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="io.quickauth.sdk_flutter">
-    <uses-permission android:name="android.permission.RECEIVE_SMS" />
-    <uses-permission android:name="android.permission.INTERNET" />
+<!--
+  No package attribute. It duplicated the namespace already declared in build.gradle, and
+  Android Gradle Plugin 8 rejects it outright:
+
+      Setting the namespace via the package attribute in the source AndroidManifest.xml
+      is no longer supported
+
+  A merchant on AGP 8 — which is most of them now — would have had the build fail here. If
+  they then ran `adb install -r` out of habit, it reinstalls the PREVIOUS apk, the one built
+  before the SDK was swapped in, and everything looks like it worked: install succeeds, the
+  app runs, and the receiver is simply not there. That is indistinguishable from "auto-read
+  does not work".
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      No SMS permission, deliberately.
+
+      This declared RECEIVE_SMS, and nothing ever used it: auto-read goes through Google's
+      SmsRetriever, which reads exactly one message — the one ending in this app's own 11-char
+      hash — and needs no permission at all. That is the entire point of the hash.
+
+      Declaring it was not merely redundant. A plugin's manifest is merged into every app that
+      depends on it, so every merchant shipped an SMS permission they did not use, and
+      RECEIVE_SMS is in Google Play's restricted set: an app declaring it must justify the use
+      in a Play Console declaration or be removed from the store. The SDK was creating a review
+      problem for its users in exchange for nothing.
+
+      INTERNET is not declared either — Flutter's own manifest already provides it.
+    -->
+
+    <!--
+      Android 11 (API 30) filters which other apps a package can see, and that filtering
+      applies to an explicit broadcast just as it does to a query: setPackage("com.whatsapp")
+      on a device where WhatsApp is invisible to us delivers nothing.
+
+      The handshake below is exactly that kind of broadcast, so without this the app targeting
+      API 30+ — which is every app now — silently fails to hand WhatsApp the handshake, and
+      zero-tap cannot work no matter how correct the template, hash and receiver are. Nothing
+      throws; the broadcast is simply dropped.
+
+      Both packages, because the user's code arrives on whichever WhatsApp they have.
+    -->
+    <queries>
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
+    </queries>
+
+    <application>
+        <!--
+          WhatsApp delivers a zero-tap or one-tap code by broadcasting to the app, not by
+          SMS, so SmsRetriever never sees it. Declared statically rather than registered at
+          runtime because zero-tap's whole promise is that the user does nothing: the code
+          can arrive while the app is backgrounded or not running, and a runtime receiver
+          would only exist when the app already does.
+
+          No android:permission, deliberately. It is tempting to restrict the sender, and an
+          earlier version of this file guessed at a WhatsApp-owned permission name — which
+          would have been the worst possible mistake here, because Android silently refuses
+          to deliver a broadcast to a receiver guarded by a permission the sender does not
+          hold. The receiver would never fire, nothing would throw, and the symptom would be
+          "zero-tap does not work" with no error to chase. Meta's documented receiver
+          declares exported="true" and no permission.
+
+          What actually keeps this safe is WhatsApp's own check, not ours: it only broadcasts
+          to an app whose package name AND 11-character signing hash match the ones on the
+          approved template. An attacker cannot satisfy that without your signing key. The
+          receiver additionally rejects anything that is not a plausible code, and passes
+          WhatsApp's request_id up to Dart so an app running Meta's handshake can tie the
+          code to a request it started.
+        -->
+        <receiver
+            android:name="io.quickauth.sdk_flutter.WhatsAppOtpReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.whatsapp.otp.OTP_RETRIEVED" />
+            </intent-filter>
+        </receiver>
+    </application>
 </manifest>
