@@ -560,4 +560,85 @@ void main() {
       expect(wa.cleared, 1);
     });
   });
+
+  group('resendOtp', () {
+    test('resends to the number the attempt is already for', () async {
+      final requests = <String>[];
+      final mock = MockClient((req) async {
+        requests.add(req.body);
+        return http.Response(
+          jsonEncode(<String, dynamic>{
+            'state': 'OTP_SENT', 'sessionId': 'sess_abc', 'expiresIn': 300,
+          }),
+          200,
+          headers: <String, String>{'content-type': 'application/json'},
+        );
+      });
+      final svc = _service(mock);
+
+      await svc.initiate(phone: '+919876543210');
+      await svc.resendOtp();
+
+      // No phone argument, and the same number both times: the merchant should not have to
+      // hold it themselves, and asking again is an opportunity to pass a different one.
+      expect(requests, hasLength(2));
+      expect(requests[1], contains('+919876543210'));
+    });
+
+    test('keeps the channel and autoSubmit of the attempt it repeats', () async {
+      final requests = <String>[];
+      final wa = _FakeWhatsAppRetriever();
+      final mock = MockClient((req) async {
+        requests.add(req.body);
+        return http.Response(
+          jsonEncode(<String, dynamic>{
+            'state': req.url.path.endsWith('/verify') ? 'VERIFIED' : 'OTP_SENT',
+            'sessionId': 'sess_abc', 'expiresIn': 300,
+          }),
+          200,
+          headers: <String, String>{'content-type': 'application/json'},
+        );
+      });
+      final events = <AuthEvent>[];
+      final svc = _service(mock, onAuthEvent: events.add, whatsapp: wa);
+
+      await svc.initiate(
+          phone: '+919876543210', channel: OtpChannel.whatsapp, autoSubmit: true);
+      await svc.resendOtp();
+
+      // A resend must behave like the request it repeats, not silently revert to defaults.
+      expect(requests[1], contains('whatsapp'));
+      wa.codes.add('445566');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(events.whereType<VerifiedEvent>(), isNotEmpty);
+    });
+
+    test('re-sends the WhatsApp handshake, because Meta expires it', () async {
+      // A user who waits before tapping resend would otherwise get a message their app can no
+      // longer auto-read, with nothing to explain it.
+      final wa = _FakeWhatsAppRetriever();
+      final svc = _service(_okInitiate(), whatsapp: wa);
+
+      await svc.initiate(phone: '+919876543210');
+      await svc.resendOtp();
+
+      expect(wa.handshakes, 2);
+    });
+
+    test('throws when there is nothing to resend', () async {
+      // A programming error rather than a runtime condition: a resend button should only exist
+      // once a code has been sent.
+      final svc = _service(_okInitiate());
+      expect(() => svc.resendOtp(), throwsA(isA<StateError>()));
+    });
+
+    test('a reset leaves nothing to resend to', () async {
+      // Resending after a reset would message someone who is no longer mid-login.
+      final svc = _service(_okInitiate());
+      await svc.initiate(phone: '+919876543210');
+      await svc.reset();
+
+      expect(() => svc.resendOtp(), throwsA(isA<StateError>()));
+    });
+  });
 }

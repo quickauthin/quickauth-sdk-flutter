@@ -173,6 +173,8 @@ class QuickAuthOtpService {
     // receives the template, and one sent afterwards is too late for the message already in
     // flight. Awaited for the same reason — firing it unawaited would race the send.
     await _wa.sendHandshake();
+    _activePhone = phone;
+    _activeChannel = channel;
     _autoSubmit = autoSubmit;
     _autoSubmitted = false;
     _listenForAutoRead();
@@ -280,11 +282,48 @@ class QuickAuthOtpService {
     _emit(OtpFailedEvent(message));
   }
 
+  /// Send the code again, to the number the current attempt is already for.
+  ///
+  /// Within the merchant's expiry window the server returns the SAME code and pushes the
+  /// expiry forward, so a user who missed the first message gets that message again rather
+  /// than a second code to choose between. Past the window it issues a fresh one, which is
+  /// what an expired code deserves.
+  ///
+  /// Takes no phone number deliberately. The merchant already gave us one, and asking again is
+  /// an opportunity to pass a different number by accident — which would start a separate
+  /// transaction and leave the user holding two codes, only one of which works.
+  ///
+  /// Carries the original attempt's channel and [initiate]'s `autoSubmit` setting, so a resend
+  /// behaves like the request it repeats rather than silently reverting to defaults.
+  ///
+  /// It also re-sends the WhatsApp handshake. Meta expires that after ten minutes, so a user
+  /// who waits before tapping resend would otherwise get a message their app can no longer
+  /// auto-read — the failure being invisible, as ever.
+  ///
+  /// Throws [StateError] if there is no attempt to resend. That is a programming error rather
+  /// than a runtime condition: a resend button should only exist once a code has been sent.
+  Future<void> resendOtp() async {
+    final phone = _activePhone;
+    if (phone == null) {
+      throw StateError(
+        'resendOtp: nothing to resend — call initiate() first.',
+      );
+    }
+    await initiate(
+      phone: phone,
+      channel: _activeChannel,
+      autoSubmit: _autoSubmit,
+    );
+  }
+
   /// Stop listening for auto-read codes. Called on reset, and safe to call twice.
   Future<void> _stopAutoRead() async {
     await _autoReadSub?.cancel();
     _autoReadSub = null;
     _autoSubmit = false;
+    // Nothing left to resend to: a reset ends the attempt, and resending afterwards would
+    // message someone who is no longer mid-login.
+    _activePhone = null;
   }
 
   /// Reset the state machine. Pass [forgetDevice] = `true` on user-initiated
@@ -305,6 +344,14 @@ class QuickAuthOtpService {
     _emit(OtpAutoReadEvent(code));
     _maybeAutoSubmit(code);
   }
+
+  /// The phone and options of the live attempt, so [resendOtp] needs no arguments.
+  ///
+  /// A merchant should not have to hold the number themselves to resend to it — they already
+  /// gave it to us, and asking again is an opportunity to pass a different one, which would
+  /// start a second transaction and leave the user holding two codes.
+  String? _activePhone;
+  OtpChannel _activeChannel = OtpChannel.auto;
 
   /// Whether the current attempt should verify an auto-read code by itself.
   bool _autoSubmit = false;
