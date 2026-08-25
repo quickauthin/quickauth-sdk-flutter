@@ -34,9 +34,6 @@ class WhatsAppOtpRetriever {
   bool get isSupported => _supportedOverride ?? (!kIsWeb && Platform.isAndroid);
 
   /// Codes as WhatsApp delivers them — already the code, not a message to parse.
-  ///
-  /// Broadcast, so a widget and a service can both listen; the underlying channel is created
-  /// once and shared.
   Stream<String> observe() {
     if (!isSupported) return const Stream<String>.empty();
     return _stream ??= _eventChannel
@@ -46,22 +43,16 @@ class WhatsAppOtpRetriever {
         .asBroadcastStream();
   }
 
-  /// What arrives from the platform, cleaned up.
-  ///
-  /// A padded code fails verification for no reason the user can see, and an empty broadcast
-  /// would otherwise clear the OTP field or submit nothing.
+  /// A padded code fails verification for no visible reason; an empty broadcast would clear
+  /// the OTP field or submit nothing.
   @visibleForTesting
   static String normalise(Object? event) => event is String ? event.trim() : '';
 
   /// Tell WhatsApp a code is about to be requested, and that this app may receive it.
   ///
-  /// Zero-tap does not work without this. Meta requires the handshake to be broadcast BEFORE
-  /// the authentication template is sent — without it WhatsApp shows the message and simply
+  /// Meta requires this BEFORE the template is sent; without it WhatsApp shows the message and
   /// never broadcasts the code, with every other check passing and nothing to explain it.
-  ///
-  /// The handshake expires after ten minutes, so it is sent per request rather than once at
-  /// startup. Returns the request id WhatsApp will echo back with the code, or null where
-  /// this is not supported or the broadcast failed.
+  /// Expires after ten minutes, so it goes per request rather than once at startup.
   ///
   /// Never throws: a missing handshake costs auto-read, not the login.
   Future<String?> sendHandshake() async {
@@ -75,9 +66,8 @@ class WhatsAppOtpRetriever {
 
   /// Discard any code held natively from an earlier attempt.
   ///
-  /// Call when requesting a fresh OTP. Without it, a code that arrived after the user gave up
-  /// on a previous attempt would be delivered against the new request and fail verification
-  /// for reasons the user cannot see.
+  /// Without this, a code that arrived after the user gave up on a previous attempt would be
+  /// delivered against the new request and fail verification for reasons they cannot see.
   Future<void> clearPending() async {
     if (!isSupported) return;
     try {
