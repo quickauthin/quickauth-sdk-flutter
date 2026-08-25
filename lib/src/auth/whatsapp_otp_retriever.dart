@@ -95,9 +95,6 @@ class SmsChannel {
   /// Method channel shared by the SMS and WhatsApp paths.
   static const String method = 'io.quickauth/sms_retriever';
 
-  /// SMS bodies, for the SmsRetriever path to parse.
-  static const String smsEvents = 'io.quickauth/sms_retriever/events';
-
   /// WhatsApp zero-tap / one-tap codes, already extracted.
   static const String whatsappEvents = 'io.quickauth/whatsapp_otp/events';
 }

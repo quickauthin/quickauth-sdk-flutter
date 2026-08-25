@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quickauth_flutter/quickauth_flutter.dart';
+import 'package:quickauth_flutter/src/auth/sms_retriever.dart';
 
 /// WhatsApp's zero-tap / one-tap code path.
 ///
@@ -73,6 +74,6 @@ void main() {
   test('the SMS and WhatsApp channels stay separate', () {
     // They carry different things — a whole message body versus an extracted code — and
     // merging them would hand every existing SMS listener a shape it was never written for.
-    expect(SmsChannel.smsEvents, isNot(SmsChannel.whatsappEvents));
+    expect(SmsRetriever.eventChannelName, isNot(SmsChannel.whatsappEvents));
   });
 }
