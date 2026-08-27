@@ -1,6 +1,10 @@
 Pod::Spec.new do |s|
-  s.name             = 'quickauth_sdk_flutter'
-  s.version          = '0.1.0'
+  # MUST stay identical to `name:` in pubspec.yaml, and this file MUST be named
+  # <that name>.podspec. Flutter's podhelper.rb resolves a plugin's podspec purely
+  # by that convention (.symlinks/plugins/<name>/ios/<name>.podspec) — a mismatch
+  # fails `pod install` with "No podspec found", never a warning.
+  s.name             = 'quickauth_flutter'
+  s.version          = '1.2.0'
   s.summary          = 'QuickAuth Flutter SDK iOS bridge.'
   s.description      = <<-DESC
 QuickAuth — phone OTP and WhatsApp marketing attribution.

@@ -3,6 +3,29 @@
 All notable changes to the QuickAuth Flutter SDK are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.1] — 2026-08-27
+
+### Fixed
+
+- **iOS integration now works at all.** `pod install` failed in every consuming app with
+  `No podspec found for 'quickauth_flutter' in .symlinks/plugins/quickauth_flutter/ios`.
+  Flutter resolves a plugin's podspec purely by convention — `<package name>.podspec` inside
+  the plugin's `ios/` — but the file was named `quickauth_sdk_flutter.podspec` and declared
+  `s.name = 'quickauth_sdk_flutter'`, while the package is `quickauth_flutter`. Both now match
+  the package name, and `s.version` tracks the package version instead of sitting at `0.1.0`.
+  Android was never affected: Gradle resolves through the `package`/`pluginClass` declared in
+  `pubspec.yaml` and has no filename convention, which is why this went unnoticed from v0.1.0
+  through v1.2.0 — every one of those releases is broken on iOS. Upgrading is the only fix;
+  there is no workaround inside a consuming app short of a dependency override.
+
+### Changed
+
+- **The publish workflow now verifies the podspec name before shipping.** Nothing in the repo
+  could previously see this class of fault: the workflow runs on `ubuntu-latest` and never
+  invokes CocoaPods, and `example/` has no `ios/` runner, so a broken podspec published green
+  and failed only on the integrator's Mac. The check needs no macOS runner and fails on either
+  half of the mismatch — wrong filename, or a mismatched `s.name`.
+
 ## [1.2.0] — 2026-08-25
 
 ### Added

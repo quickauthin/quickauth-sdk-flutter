@@ -113,6 +113,33 @@ jobs:
       - name: flutter pub get
         run: flutter pub get
 
+      # Guards a failure mode nothing else here can see. This job runs on Ubuntu
+      # and never invokes CocoaPods, and the example app has no ios/ runner, so a
+      # broken iOS podspec publishes clean and only fails on the integrator's Mac
+      # ("No podspec found for `<name>`"). v0.1.0 through v1.2.0 shipped that way.
+      # Flutter resolves a plugin's podspec by convention:
+      #   .symlinks/plugins/<pubspec name>/ios/<pubspec name>.podspec
+      # so the filename AND s.name must both equal the pubspec package name.
+      - name: Verify iOS podspec matches the package name
+        run: |
+          PKG=$(grep -E '^name:' pubspec.yaml | head -1 | awk '{print $2}')
+          echo "package: $PKG"
+
+          if [ ! -f "ios/$PKG.podspec" ]; then
+            echo "::error::expected ios/$PKG.podspec — found: $(ls ios/*.podspec 2>/dev/null || echo none)"
+            exit 1
+          fi
+
+          # POSIX classes, not \s — \s is a GNU extension and silently matches
+          # nothing on BSD tools, which would make this check pass on anything.
+          POD=$(grep -E "^[[:space:]]*s\.name" "ios/$PKG.podspec" \
+                | sed -E "s/.*=[[:space:]]*'([^']+)'.*/\1/")
+          if [ "$POD" != "$PKG" ]; then
+            echo "::error::ios/$PKG.podspec declares s.name='$POD', expected '$PKG'"
+            exit 1
+          fi
+          echo "ok — ios/$PKG.podspec declares s.name='$POD'"
+
       - name: flutter analyze (errors only)
         # Info-level lints (missing docs, prefer_const, etc.) are allowed;
         # only `error` severity blocks the publish.
